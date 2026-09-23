@@ -14,6 +14,7 @@ from uuid import UUID
 import psycopg
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.encoders import jsonable_encoder
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from psycopg.rows import dict_row
