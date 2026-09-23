@@ -13,6 +13,7 @@ from uuid import UUID
 
 import psycopg
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from psycopg.rows import dict_row
@@ -246,7 +247,7 @@ def create_lead(payload: LeadCreate):
         cur.execute(f"insert into leads.leads ({','.join(cols)}) values ({placeholders}) returning *", vals)
         lead = cur.fetchone()
         cur.execute("insert into lead_audit.lead_changes(lead_id,action,new_data,actor) values(%s,'create',%s,'dashboard')",
-                    (lead["lead_id"], Jsonb(lead)))
+                    (lead["lead_id"], Jsonb(jsonable_encoder(lead))))
         cur.execute("insert into lead_ops.outbox(event_type,aggregate_id,payload) values('lead.created',%s,%s)",
                     (lead["lead_id"], Jsonb({"lead_id":str(lead["lead_id"])})))
         return lead
@@ -276,7 +277,7 @@ def update_lead(lead_id: UUID, payload: LeadUpdate):
         cur.execute(f"update leads.leads set {sets} where lead_id=%s returning *", vals)
         new = cur.fetchone()
         cur.execute("insert into lead_audit.lead_changes(lead_id,action,old_data,new_data,actor) values(%s,'update',%s,%s,'dashboard')",
-                    (lead_id, Jsonb(old), Jsonb(new)))
+                    (lead_id, Jsonb(jsonable_encoder(old)), Jsonb(jsonable_encoder(new))))
         cur.execute("insert into lead_ops.outbox(event_type,aggregate_id,payload) values('lead.updated',%s,%s)",
                     (lead_id, Jsonb({"lead_id":str(lead_id),"fields":list(changes.keys())})))
         return new
