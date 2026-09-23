@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "system": "Leads-Workstation",
+  "authority": {
+    "canonical_leads": "Leads-Workstation",
+    "schema_and_migrations": "Database-migrations-",
+    "ingestion": "Meltano-Leads-Importer",
+    "downstream_automation": "N8N"
+  },
+  "integrations": [
+    {
+      "from": "Meltano-Leads-Importer",
+      "to": "PostgreSQL",
+      "contract": "write lead_import_raw only",
+      "mode": "batch/incremental"
+    },
+    {
+      "from": "Leads-Workstation",
+      "to": "PostgreSQL",
+      "contract": "promote validated records; canonical CRUD; audit",
+      "mode": "transactional"
+    },
+    {
+      "from": "N8N",
+      "to": "Leads-Workstation",
+      "contract": "API/governed command only; no direct canonical DB writes",
+      "mode": "event/workflow"
+    },
+    {
+      "from": "Leads-Workstation",
+      "to": "N8N",
+      "contract": "outbox/webhook accepted-lead and next-action events",
+      "mode": "event"
+    },
+    {
+      "from": "Database-migrations-",
+      "to": "all",
+      "contract": "schema/role/migration compatibility",
+      "mode": "release dependency"
+    }
+  ],
+  "invariants": [
+    "country and business_category are distinct fields",
+    "imports are idempotent by batch/fingerprint",
+    "raw import rows never silently become canonical leads",
+    "uncertain duplicates enter review queue",
+    "every canonical write is auditable"
+  ]
+}
