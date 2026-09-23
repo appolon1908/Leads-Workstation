@@ -14,7 +14,7 @@ from uuid import UUID
 import psycopg
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from psycopg.rows import dict_row
 from psycopg.types.json import Jsonb
@@ -41,6 +41,16 @@ def fingerprint(data: dict[str, Any]) -> str:
         (clean_text(data.get("country")) or "").casefold(),
     ]
     return hashlib.sha256("|".join(parts).encode()).hexdigest()
+
+def vcf_escape(value: Any) -> str:
+    text = clean_text(value) or ""
+    return (
+        text.replace("\\", "\\\\")
+        .replace("\r", "")
+        .replace("\n", "\\n")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+    )
 
 def db_kwargs() -> dict[str, Any]:
     required = ["LEADS_DB_HOST","LEADS_DB_PORT","LEADS_DB_NAME","LEADS_APP_USER","LEADS_APP_PASSWORD"]
@@ -321,6 +331,64 @@ def data_quality():
         cur.execute("select * from lead_ops.duplicate_review where status='pending' order by created_at desc limit 100")
         review = cur.fetchall()
     return {**metrics, "duplicate_groups":duplicates, "review_queue":review}
+
+@app.get("/api/export/thunderbird.vcf")
+def export_thunderbird_vcf(
+    q: str | None = None,
+    country: str | None = None,
+    business_category: str | None = None,
+    status: str | None = None,
+    owner: str | None = None,
+    priority: str | None = None,
+    limit: int = Query(5000, ge=1, le=20000),
+):
+    """Read-only Thunderbird address-book export of canonical local leads."""
+    where, params = ["status <> 'archived'"], []
+    if q:
+        where.append("""(business_name ilike %s or coalesce(contact_name,'') ilike %s or coalesce(email,'') ilike %s
+          or coalesce(phone,'') ilike %s or coalesce(website,'') ilike %s or coalesce(notes,'') ilike %s)""")
+        params.extend([f"%{q}%"] * 6)
+    for col, val in [
+        ("country", country),
+        ("business_category", business_category),
+        ("status", status),
+        ("owner_name", owner),
+        ("priority", priority),
+    ]:
+        if val:
+            where.append(f"{col}=%s")
+            params.append(val)
+    sql = """select lead_id,business_name,contact_name,country,business_category,email,phone
+             from leads.leads where """ + " and ".join(where) + " order by updated_at desc limit %s"
+    params.append(limit)
+    with db() as (_, cur):
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+
+    cards: list[str] = []
+    for lead in rows:
+        if not lead.get("email") and not lead.get("phone"):
+            continue
+        display = lead.get("contact_name") or lead.get("business_name") or lead.get("email") or lead.get("phone") or "Lead"
+        lines = ["BEGIN:VCARD", "VERSION:3.0", f"FN:{vcf_escape(display)}"]
+        if lead.get("business_name"):
+            lines.append(f"ORG:{vcf_escape(lead['business_name'])}")
+        if lead.get("email"):
+            lines.append(f"EMAIL;TYPE=INTERNET:{vcf_escape(lead['email'])}")
+        if lead.get("phone"):
+            lines.append(f"TEL;TYPE=CELL:{vcf_escape(lead['phone'])}")
+        if lead.get("country"):
+            lines.append(f"ADR;TYPE=WORK:;;;;;;{vcf_escape(lead['country'])}")
+        if lead.get("business_category"):
+            lines.append(f"CATEGORIES:{vcf_escape(lead['business_category'])}")
+        lines.extend([f"UID:codestra-lead-{lead['lead_id']}", "END:VCARD"])
+        cards.extend(lines)
+    content = "\r\n".join(cards) + ("\r\n" if cards else "")
+    return Response(
+        content=content,
+        media_type="text/vcard; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="codestra-leads-thunderbird.vcf"'},
+    )
 
 @app.get("/api/import-batches")
 def import_batches():
