@@ -14,7 +14,6 @@ from uuid import UUID
 import psycopg
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.encoders import jsonable_encoder
-from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from psycopg.rows import dict_row
@@ -233,6 +232,8 @@ def create_lead(payload: LeadCreate):
     data["business_name"] = clean_text(data["business_name"])
     data["country"] = clean_text(data["country"])
     data["business_category"] = clean_text(data["business_category"])
+    if not data["business_name"] or not data["country"] or not data["business_category"]:
+        raise HTTPException(422, "business_name, country and business_category are required")
     for k in list(data):
         if isinstance(data[k], str):
             data[k] = clean_text(data[k])
@@ -241,7 +242,7 @@ def create_lead(payload: LeadCreate):
         cur.execute("select lead_id,business_name from leads.leads where duplicate_fingerprint=%s and status<>'archived' limit 1", (fp,))
         dup = cur.fetchone()
         if dup:
-            raise HTTPException(409, {"message":"possible exact duplicate","existing":dup})
+            raise HTTPException(409, {"message":"possible exact duplicate","existing":jsonable_encoder(dup)})
         cols = list(data.keys()) + ["duplicate_fingerprint"]
         vals = [data[k] for k in data] + [fp]
         placeholders = ",".join(["%s"]*len(vals))
@@ -273,6 +274,12 @@ def update_lead(lead_id: UUID, payload: LeadUpdate):
         if not clean_text(merged["business_name"]) or not clean_text(merged["country"]) or not clean_text(merged["business_category"]):
             raise HTTPException(422, "business_name, country and business_category are required")
         changes["duplicate_fingerprint"] = fingerprint(merged)
+        cur.execute("""select lead_id,business_name from leads.leads
+                       where duplicate_fingerprint=%s and lead_id<>%s and status<>'archived' limit 1""",
+                    (changes["duplicate_fingerprint"], lead_id))
+        dup = cur.fetchone()
+        if dup:
+            raise HTTPException(409, {"message":"possible exact duplicate","existing":jsonable_encoder(dup)})
         sets = ", ".join(f"{k}=%s" for k in changes)
         vals = list(changes.values()) + [lead_id]
         cur.execute(f"update leads.leads set {sets} where lead_id=%s returning *", vals)
