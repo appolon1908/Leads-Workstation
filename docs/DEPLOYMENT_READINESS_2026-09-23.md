@@ -104,3 +104,18 @@ Implemented and verified on the localhost-only backup workstation:
 
 Hosted GitHub Actions remains a separate release gate and is still not represented as green.
 
+## PAS-275 orphaned outbox reconciliation — 2026-09-24
+
+Implemented and live-verified on the backup/local recovery node only:
+
+- Added read-only `GET /api/ops/outbox/orphans` to identify pending `lead.created` / `lead.updated` events whose canonical aggregate no longer exists.
+- Added guarded `POST /api/ops/outbox/{event_id}/dead-letter`; it requires explicit `confirm_orphan=true`, a reason and an actor, refuses non-pending or still-live aggregates, preserves the original event payload, and records `outbox.dead_letter_orphan` audit evidence.
+- The pre-existing four pending `lead.created` records were proven orphaned while canonical lead count was `0`. A request without confirmation returned `409` with zero mutation.
+- Governed reconciliation changed all four records from `pending` to `dead_letter`; repeated reconciliation of the first event was idempotent (`changed=false`). Every response reported `external_effects=0`.
+- Final database readback: pending outbox `0`, dead-letter outbox `4`, `outbox.dead_letter_orphan` audit rows `4`, canonical leads `0`, raw authority rows `104677`, provenance manifest rows `104677`.
+- N8N remained stopped with port `5678` closed; no calling, email, SMS or provider delivery was attempted.
+- Pre-reconciliation protected backup: `/home/codestra/Backups/Leads/leads_workstation_20260924T045040-0400.dump`, SHA-256 `94509c6235854fca66faa47194257e69bed040f79927cc340164e0d3a0e54097`.
+- Post-reconciliation protected backup: `/home/codestra/Backups/Leads/leads_workstation_20260924T045324-0400.dump`, SHA-256 `6c5c6fc3b1d71234ada98b04813184eeb181150795dc9de4af7e7d9c3a1a6e6f`; sidecar SHA and `pg_restore --list` passed.
+- Disposable restore of the post-reconciliation dump proved canonical `0`, raw authority `104677`, provenance manifest `104677`, pending outbox `0`, dead-letter outbox `4`, audit evidence `4`; the disposable database and temporary restore copy were removed after verification.
+
+This closes the known orphaned-outbox cleanup gap locally. It does **not** make hosted CI green, authorize N8N activation, authorize real canonical promotion, or change this workstation's backup-only authority.

@@ -145,6 +145,12 @@ class ActivityCreate(BaseModel):
     body: str = Field(min_length=1, max_length=10000)
     actor: str = "dashboard"
 
+class OutboxDeadLetterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor: str = Field(default="dashboard", min_length=1, max_length=200)
+    reason: str = Field(min_length=1, max_length=2000)
+    confirm_orphan: bool = False
+
 class DuplicateReviewCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     import_batch_id: UUID | None = None
@@ -420,6 +426,55 @@ def add_activity(lead_id: UUID, payload: ActivityCreate):
                        values(%s,%s,%s,%s) returning *""",
                     (lead_id,payload.activity_type,payload.body,payload.actor))
         return cur.fetchone()
+
+@app.get("/api/ops/outbox/orphans")
+def list_orphaned_outbox(limit: int = Query(100, ge=1, le=1000)):
+    """Read-only queue of pending lead events whose canonical aggregate no longer exists."""
+    with db() as (_, cur):
+        cur.execute("""
+          select o.*
+          from lead_ops.outbox o
+          left join leads.leads l on l.lead_id=o.aggregate_id
+          where o.status='pending'
+            and o.event_type in ('lead.created','lead.updated')
+            and o.aggregate_id is not null
+            and l.lead_id is null
+          order by o.created_at asc, o.event_id asc
+          limit %s
+        """, (limit,))
+        rows = cur.fetchall()
+    return {"orphaned_events": rows, "count": len(rows), "writes_performed": 0}
+
+@app.post("/api/ops/outbox/{event_id}/dead-letter")
+def dead_letter_orphaned_outbox(event_id: UUID, payload: OutboxDeadLetterRequest):
+    """Governed local-only reconciliation for orphaned lead events; payload evidence is preserved."""
+    if payload.confirm_orphan is not True:
+        raise HTTPException(409, "confirm_orphan=true is required")
+    actor = clean_text(payload.actor) or "dashboard"
+    reason = clean_text(payload.reason)
+    if not reason:
+        raise HTTPException(422, "reason is required")
+    with db() as (_, cur):
+        cur.execute("select * from lead_ops.outbox where event_id=%s for update", (event_id,))
+        event = cur.fetchone()
+        if not event:
+            raise HTTPException(404, "outbox event not found")
+        if event["status"] == "dead_letter":
+            return {"changed": False, "event": event, "reason": reason, "external_effects": 0}
+        if event["status"] != "pending":
+            raise HTTPException(409, {"message": "only pending events may be reconciled", "status": event["status"]})
+        if event["event_type"] not in {"lead.created", "lead.updated"} or event["aggregate_id"] is None:
+            raise HTTPException(409, "event is not an eligible lead aggregate event")
+        cur.execute("select 1 from leads.leads where lead_id=%s", (event["aggregate_id"],))
+        if cur.fetchone():
+            raise HTTPException(409, "event still references an existing canonical lead")
+        cur.execute("update lead_ops.outbox set status='dead_letter' where event_id=%s returning *", (event_id,))
+        updated = cur.fetchone()
+        cur.execute(
+            "insert into lead_audit.lead_changes(lead_id,action,old_data,new_data,actor) values(NULL,'outbox.dead_letter_orphan',%s,%s,%s)",
+            (Jsonb(jsonable_encoder(event)), Jsonb({"event": jsonable_encoder(updated), "reason": reason}), actor),
+        )
+        return {"changed": True, "event": updated, "reason": reason, "external_effects": 0}
 
 @app.get("/api/data-quality")
 def data_quality():
