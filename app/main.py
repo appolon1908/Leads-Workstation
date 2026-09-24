@@ -145,6 +145,29 @@ class ActivityCreate(BaseModel):
     body: str = Field(min_length=1, max_length=10000)
     actor: str = "dashboard"
 
+class DuplicateReviewCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    import_batch_id: UUID | None = None
+    source_row: int | None = Field(default=None, ge=1)
+    fingerprint: str = Field(min_length=1, max_length=128)
+    candidate_lead_id: UUID | None = None
+    match_score: float | None = Field(default=None, ge=0, le=1)
+    raw_payload: dict[str, Any] = Field(default_factory=dict)
+    actor: str = Field(default="dashboard", min_length=1, max_length=200)
+
+class DuplicateReviewResolve(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: str
+    candidate_lead_id: UUID | None = None
+    actor: str = Field(default="dashboard", min_length=1, max_length=200)
+
+    @field_validator("status")
+    @classmethod
+    def status_ok(cls, v: str) -> str:
+        if v not in {"accepted", "rejected", "merged"}:
+            raise ValueError("status must be accepted, rejected or merged")
+        return v
+
 app = FastAPI(title="Codestra Leads Workstation", version="0.1.0")
 
 @app.get("/")
@@ -331,6 +354,93 @@ def data_quality():
         cur.execute("select * from lead_ops.duplicate_review where status='pending' order by created_at desc limit 100")
         review = cur.fetchall()
     return {**metrics, "duplicate_groups":duplicates, "review_queue":review}
+
+@app.get("/api/data-quality/duplicate-reviews")
+def duplicate_reviews(
+    status: str | None = Query("pending"),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    if status is not None and status not in {"pending", "accepted", "rejected", "merged"}:
+        raise HTTPException(422, "invalid duplicate review status")
+    with db() as (_, cur):
+        if status is None:
+            cur.execute("select * from lead_ops.duplicate_review order by created_at desc limit %s", (limit,))
+        else:
+            cur.execute("select * from lead_ops.duplicate_review where status=%s order by created_at desc limit %s", (status, limit))
+        return cur.fetchall()
+
+@app.post("/api/data-quality/duplicate-reviews", status_code=201)
+def queue_duplicate_review(payload: DuplicateReviewCreate):
+    data = payload.model_dump()
+    data["fingerprint"] = clean_text(data["fingerprint"])
+    data["actor"] = clean_text(data["actor"]) or "dashboard"
+    if not data["fingerprint"]:
+        raise HTTPException(422, "fingerprint is required")
+    with db() as (_, cur):
+        if data["import_batch_id"] is not None:
+            cur.execute("select 1 from lead_ops.import_batches where import_batch_id=%s", (data["import_batch_id"],))
+            if not cur.fetchone():
+                raise HTTPException(404, "import batch not found")
+        if data["candidate_lead_id"] is not None:
+            cur.execute("select 1 from leads.leads where lead_id=%s", (data["candidate_lead_id"],))
+            if not cur.fetchone():
+                raise HTTPException(404, "candidate lead not found")
+        cur.execute("""
+          select * from lead_ops.duplicate_review
+          where status='pending'
+            and fingerprint=%s
+            and import_batch_id is not distinct from %s
+            and source_row is not distinct from %s
+            and candidate_lead_id is not distinct from %s
+          order by created_at desc limit 1
+        """, (data["fingerprint"], data["import_batch_id"], data["source_row"], data["candidate_lead_id"]))
+        existing = cur.fetchone()
+        if existing:
+            return {"created": False, "review": existing, "canonical_writes_performed": 0}
+        cur.execute("""
+          insert into lead_ops.duplicate_review(
+            import_batch_id,source_row,fingerprint,candidate_lead_id,match_score,raw_payload,status
+          ) values(%s,%s,%s,%s,%s,%s,'pending') returning *
+        """, (
+            data["import_batch_id"], data["source_row"], data["fingerprint"], data["candidate_lead_id"],
+            data["match_score"], Jsonb(data["raw_payload"]),
+        ))
+        review = cur.fetchone()
+        cur.execute(
+            "insert into lead_audit.lead_changes(lead_id,action,new_data,actor) values(%s,'duplicate_review.queued',%s,%s)",
+            (data["candidate_lead_id"], Jsonb(jsonable_encoder(review)), data["actor"]),
+        )
+        return {"created": True, "review": review, "canonical_writes_performed": 0}
+
+@app.patch("/api/data-quality/duplicate-reviews/{review_id}")
+def resolve_duplicate_review(review_id: int, payload: DuplicateReviewResolve):
+    with db() as (_, cur):
+        cur.execute("select * from lead_ops.duplicate_review where review_id=%s for update", (review_id,))
+        old = cur.fetchone()
+        if not old:
+            raise HTTPException(404, "duplicate review not found")
+        candidate = payload.candidate_lead_id or old["candidate_lead_id"]
+        if candidate is not None:
+            cur.execute("select 1 from leads.leads where lead_id=%s", (candidate,))
+            if not cur.fetchone():
+                raise HTTPException(404, "candidate lead not found")
+        if payload.status == "merged" and candidate is None:
+            raise HTTPException(422, "merged review requires candidate_lead_id")
+        if old["status"] != "pending":
+            if old["status"] == payload.status and old["candidate_lead_id"] == candidate:
+                return {"changed": False, "review": old, "canonical_writes_performed": 0}
+            raise HTTPException(409, {"message": "review already resolved", "status": old["status"]})
+        cur.execute("""
+          update lead_ops.duplicate_review
+          set status=%s,candidate_lead_id=%s,resolved_at=now()
+          where review_id=%s returning *
+        """, (payload.status, candidate, review_id))
+        new = cur.fetchone()
+        cur.execute(
+            "insert into lead_audit.lead_changes(lead_id,action,old_data,new_data,actor) values(%s,%s,%s,%s,%s)",
+            (candidate, f"duplicate_review.{payload.status}", Jsonb(jsonable_encoder(old)), Jsonb(jsonable_encoder(new)), payload.actor),
+        )
+        return {"changed": True, "review": new, "canonical_writes_performed": 0}
 
 @app.get("/api/export/thunderbird.vcf")
 def export_thunderbird_vcf(

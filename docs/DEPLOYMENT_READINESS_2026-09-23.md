@@ -44,3 +44,25 @@ SHA-256:
 LOCAL BACKUP DEPLOYMENT READY / PRODUCTION NO-GO
 
 The workstation is ready to operate as the authorized local backup/recovery Leads Platform with synthetic/test data and local-only services. It is not authorized for real-data ingestion or production effects.
+
+## PAS-275 uncertain-match control
+
+- Duplicate review records are queued in `lead_ops.duplicate_review` and exposed through governed API endpoints.
+- Queue creation is idempotent for the same pending batch/source-row/fingerprint/candidate tuple.
+- Resolution supports `accepted`, `rejected`, and `merged`; `merged` requires an existing candidate lead.
+- Review resolution mutates review state and audit evidence only; it performs **zero automatic canonical lead writes**.
+- The dashboard presents pending uncertain matches with explicit human review actions.
+- This closes the behavior gap only after local API/readback tests pass; hosted CI remains a separate required gate.
+## PAS-273/PAS-274/PAS-275 local verification refresh
+
+Verified on the backup Ubuntu workstation on 2026-09-23:
+
+- Duplicate-review API queue creation returned `201`, repeated queueing of the same pending tuple was idempotent, and review resolution returned `canonical_writes_performed=0`.
+- `merged` without a candidate lead was rejected with `422`; repeated identical resolution was idempotent.
+- The synthetic candidate lead remained at version `1` throughout review actions, proving the review path did not mutate the canonical lead row.
+- Audit evidence was emitted for queue and resolution actions. Synthetic lead, review, and audit records were removed after verification; canonical lead count returned to `0`.
+- Headless Chrome/Playwright verified navigation to Data Quality, rendering the pending uncertain-match card, confirmation + Accept distinct interaction, All Leads navigation, and return to Executive. No browser console errors or HTTP error responses remained after adding an inline empty favicon.
+- Browser-driven review resolution preserved the canonical lead version and changed only review state to `accepted`; synthetic rows were removed and canonical count returned to `0`.
+
+Hosted GitHub Actions remains a separate required release gate and is not represented as green by these local checks.
+
