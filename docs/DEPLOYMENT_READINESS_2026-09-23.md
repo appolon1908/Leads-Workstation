@@ -8,7 +8,7 @@ Authority: backup/local execution and recovery only; not production authority.
 
 - PostgreSQL 18.6 local instance is reachable on 127.0.0.1:5432.
 - Database leads_workstation has schemas lead_import_raw, leads, lead_audit, and lead_ops.
-- Six canonical/operations tables are present.
+- Eight contract tables are present across `leads`, `lead_audit`, and `lead_ops`; governed raw staging remains separate.
 - Roles leads_owner, leads_importer, leads_app, and leads_readonly exist; no n8n database role exists.
 - Importer can create/write only in raw staging and cannot create/write canonical leads.
 - Application role has CRUD on canonical leads; readonly role has SELECT without write.
@@ -20,7 +20,7 @@ Authority: backup/local execution and recovery only; not production authority.
 - CSV preview reported writes_performed=0.
 - N8N port 127.0.0.1:5678 remains closed; workflow activation remains unauthorized.
 - N8N focused integration/policy/community runtime suite passed 50 tests locally.
-- Local backup/restore verification passed: 4 schemas, 6 tables, canonical count 0.
+- Latest local backup/restore verification passed: 4 schemas, 8 contract tables, 104,677 provenance-manifest rows, 104,677 governed raw authority rows, canonical count 0.
 - Ubuntu desktop launcher is installed and points only to the local 127.0.0.1:8780 service.
 
 ## Backup evidence
@@ -33,8 +33,8 @@ SHA-256:
 
 ## Gates that remain closed
 
-- No canonical real lead source has been identified. PAS-269 remains open.
-- No real lead import is authorized until PAS-269 is satisfied.
+- PAS-269 authority is frozen to the verified D: batch; governed raw staging is complete. Canonical promotion remains separately gated.
+- The real batch remains `promotion_authorized=false`; no canonical real lead promotion is authorized.
 - GitHub draft PR heads currently have no completed CI check runs; this local certificate does not replace required protected CI.
 - N8N and Database-migrations integration PRs remain draft and must not be merged until their verification gates are green.
 - No production/live calling, email, SMS, provider side effects, remote database mutation, or promotion of this backup node to source-of-truth is authorized.
@@ -43,7 +43,7 @@ SHA-256:
 
 LOCAL BACKUP DEPLOYMENT READY / PRODUCTION NO-GO
 
-The workstation is ready to operate as the authorized local backup/recovery Leads Platform with synthetic/test data and local-only services. It is not authorized for real-data ingestion or production effects.
+The workstation is ready to operate as the authorized local backup/recovery Leads Platform with the frozen real batch in governed raw/provenance staging and local-only services. Canonical real-data promotion and production effects remain unauthorized.
 
 ## PAS-275 uncertain-match control
 
@@ -66,3 +66,26 @@ Verified on the backup Ubuntu workstation on 2026-09-23:
 
 Hosted GitHub Actions remains a separate required release gate and is not represented as green by these local checks.
 
+
+
+## Governed raw-to-canonical promotion verification — 2026-09-24
+
+Implemented locally on the backup node:
+
+- `lead_ops.import_row_manifest` binds every candidate to an exact staged batch/source-row/source-fingerprint tuple without granting the Leads API raw-schema access.
+- The frozen authority batch has 104,677 manifest rows matching 104,677 raw rows and 104,677 distinct source fingerprints.
+- `lead_ops.promotion_candidates` stores normalized review candidates; queue and review operations report `canonical_writes_performed=0`.
+- Candidate creation rejects provenance tuples not present in the manifest.
+- Incomplete candidates enter review; approval with missing required canonical fields is rejected.
+- Approved candidate promotion requires both `provenance_manifest_verified=true` and `promotion_authorized=true` on a completed import batch.
+- Synthetic authorized-batch test promoted exactly one synthetic lead through the Leads API, emitted audit/outbox evidence, rejected a canonical exact duplicate, and proved repeated promotion is idempotent with zero additional writes.
+- Synthetic blocked-batch test returned `403` when `promotion_authorized=false`.
+- All synthetic candidate/lead/audit/outbox/batch evidence was removed deterministically after verification; final canonical count returned to `0`.
+- Frozen real batch remains `promotion_authorized=false`, `rows_accepted=0`; no real candidate was promoted.
+- N8N port 5678 remains closed.
+
+Latest protected backup after this extension:
+`/home/codestra/Backups/Leads/leads_workstation_20260924T020521-0400.dump`
+SHA-256: `599d744eb48281a59f5449d0abda9c609f5a235b221d58c3cc3e94e4ef2a637d`
+
+Disposable restore verified 4 schemas, 8 contract tables, 104,677 manifest rows, 104,677 raw authority rows, canonical count `0`, and the real-batch promotion gate still closed.

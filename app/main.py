@@ -168,6 +168,81 @@ class DuplicateReviewResolve(BaseModel):
             raise ValueError("status must be accepted, rejected or merged")
         return v
 
+
+class LeadCandidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    business_name: str | None = None
+    contact_name: str | None = None
+    country: str | None = None
+    state_province: str | None = None
+    city: str | None = None
+    business_category: str | None = None
+    campaign_source: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    website: str | None = None
+    status: str | None = None
+    owner_name: str | None = None
+    priority: str | None = None
+    last_contact_at: datetime | None = None
+    next_action: str | None = None
+    notes: str | None = None
+    source_file: str | None = None
+
+    @field_validator("status")
+    @classmethod
+    def status_ok(cls, v: str | None) -> str | None:
+        if v is not None and v not in ALLOWED_STATUS:
+            raise ValueError("invalid status")
+        return v
+
+    @field_validator("priority")
+    @classmethod
+    def priority_ok(cls, v: str | None) -> str | None:
+        if v not in ALLOWED_PRIORITY:
+            raise ValueError("invalid priority")
+        return v or None
+
+class PromotionCandidateCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    import_batch_id: UUID
+    source_row: int = Field(ge=1)
+    source_fingerprint: str = Field(min_length=1, max_length=128)
+    lead: LeadCandidate = Field(default_factory=LeadCandidate)
+    actor: str = Field(default="dashboard", min_length=1, max_length=200)
+
+class PromotionCandidateReview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    lead: LeadCandidate | None = None
+    decision: str | None = None
+    review_reason: str | None = Field(default=None, max_length=2000)
+    actor: str = Field(default="dashboard", min_length=1, max_length=200)
+
+    @field_validator("decision")
+    @classmethod
+    def decision_ok(cls, v: str | None) -> str | None:
+        if v is not None and v not in {"pending", "review", "approve", "reject"}:
+            raise ValueError("decision must be pending, review, approve or reject")
+        return v
+
+class PromotionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor: str = Field(default="dashboard", min_length=1, max_length=200)
+
+REQUIRED_CANONICAL_FIELDS = ("business_name", "country", "business_category")
+
+def normalize_candidate(data: dict[str, Any]) -> dict[str, Any]:
+    out = dict(data)
+    for key, value in list(out.items()):
+        if isinstance(value, str):
+            out[key] = clean_text(value)
+    if out.get("status") is None:
+        out["status"] = "new"
+    return out
+
+def candidate_missing(data: dict[str, Any]) -> list[str]:
+    return [field for field in REQUIRED_CANONICAL_FIELDS if not clean_text(data.get(field))]
+
 app = FastAPI(title="Codestra Leads Workstation", version="0.1.0")
 
 @app.get("/")
@@ -441,6 +516,194 @@ def resolve_duplicate_review(review_id: int, payload: DuplicateReviewResolve):
             (candidate, f"duplicate_review.{payload.status}", Jsonb(jsonable_encoder(old)), Jsonb(jsonable_encoder(new)), payload.actor),
         )
         return {"changed": True, "review": new, "canonical_writes_performed": 0}
+
+@app.get("/api/promotion-candidates")
+def promotion_candidates(
+    status: str | None = None,
+    import_batch_id: UUID | None = None,
+    limit: int = Query(100, ge=1, le=1000),
+):
+    if status is not None and status not in {"pending", "review", "approved", "promoted", "rejected"}:
+        raise HTTPException(422, "invalid promotion candidate status")
+    where, params = [], []
+    if status is not None:
+        where.append("status=%s")
+        params.append(status)
+    if import_batch_id is not None:
+        where.append("import_batch_id=%s")
+        params.append(import_batch_id)
+    sql = "select * from lead_ops.promotion_candidates"
+    if where:
+        sql += " where " + " and ".join(where)
+    sql += " order by created_at desc limit %s"
+    params.append(limit)
+    with db() as (_, cur):
+        cur.execute(sql, params)
+        return cur.fetchall()
+
+@app.post("/api/promotion-candidates", status_code=201)
+def queue_promotion_candidate(payload: PromotionCandidateCreate):
+    actor = clean_text(payload.actor) or "dashboard"
+    source_fingerprint = clean_text(payload.source_fingerprint)
+    if not source_fingerprint:
+        raise HTTPException(422, "source_fingerprint is required")
+    lead = normalize_candidate(payload.lead.model_dump(exclude_unset=True))
+    missing = candidate_missing(lead)
+    initial_status = "review" if missing else "pending"
+    review_reason = "missing required canonical fields: " + ", ".join(missing) if missing else None
+    with db() as (_, cur):
+        cur.execute("select * from lead_ops.import_batches where import_batch_id=%s", (payload.import_batch_id,))
+        batch = cur.fetchone()
+        if not batch:
+            raise HTTPException(404, "import batch not found")
+        if batch["status"] not in {"previewed", "running", "completed"}:
+            raise HTTPException(409, {"message": "import batch is not eligible for candidate queueing", "status": batch["status"]})
+        cur.execute("""
+          select 1 from lead_ops.import_row_manifest
+          where import_batch_id=%s and source_row=%s and source_fingerprint=%s
+        """, (payload.import_batch_id, payload.source_row, source_fingerprint))
+        if not cur.fetchone():
+            raise HTTPException(409, "candidate provenance does not match the staged-row manifest")
+        cur.execute("""
+          select * from lead_ops.promotion_candidates
+          where import_batch_id=%s and source_row=%s and source_fingerprint=%s
+          limit 1
+        """, (payload.import_batch_id, payload.source_row, source_fingerprint))
+        existing = cur.fetchone()
+        if existing:
+            if existing["normalized_payload"] == lead:
+                return {"created": False, "candidate": existing, "canonical_writes_performed": 0}
+            raise HTTPException(409, {"message": "candidate provenance already exists with different normalized payload", "candidate_id": str(existing["candidate_id"])})
+        cur.execute("""
+          insert into lead_ops.promotion_candidates(
+            import_batch_id,source_row,source_fingerprint,normalized_payload,status,review_reason
+          ) values(%s,%s,%s,%s,%s,%s) returning *
+        """, (payload.import_batch_id, payload.source_row, source_fingerprint, Jsonb(jsonable_encoder(lead)), initial_status, review_reason))
+        candidate = cur.fetchone()
+        cur.execute(
+            "insert into lead_audit.lead_changes(lead_id,action,new_data,actor) values(NULL,'promotion_candidate.queued',%s,%s)",
+            (Jsonb(jsonable_encoder(candidate)), actor),
+        )
+        return {"created": True, "candidate": candidate, "missing_required_fields": missing, "canonical_writes_performed": 0}
+
+@app.patch("/api/promotion-candidates/{candidate_id}")
+def review_promotion_candidate(candidate_id: UUID, payload: PromotionCandidateReview):
+    actor = clean_text(payload.actor) or "dashboard"
+    with db() as (_, cur):
+        cur.execute("select * from lead_ops.promotion_candidates where candidate_id=%s for update", (candidate_id,))
+        old = cur.fetchone()
+        if not old:
+            raise HTTPException(404, "promotion candidate not found")
+        if old["status"] == "promoted":
+            raise HTTPException(409, "promoted candidate is immutable")
+        updated_payload = dict(old["normalized_payload"] or {})
+        if payload.lead is not None:
+            patch = payload.lead.model_dump(exclude_unset=True)
+            for key, value in patch.items():
+                updated_payload[key] = clean_text(value) if isinstance(value, str) else value
+        updated_payload = normalize_candidate(updated_payload)
+        missing = candidate_missing(updated_payload)
+        decision = payload.decision
+        if decision == "approve":
+            if missing:
+                raise HTTPException(422, {"message": "candidate is missing required canonical fields", "missing": missing})
+            try:
+                canonical = LeadCreate.model_validate(updated_payload)
+            except Exception as exc:
+                raise HTTPException(422, f"candidate failed canonical validation: {exc}") from exc
+            fp = fingerprint(canonical.model_dump())
+            cur.execute("select lead_id,business_name from leads.leads where duplicate_fingerprint=%s and status<>'archived' limit 1", (fp,))
+            duplicate = cur.fetchone()
+            if duplicate:
+                raise HTTPException(409, {"message": "canonical exact duplicate exists", "existing": jsonable_encoder(duplicate)})
+            new_status = "approved"
+        elif decision == "reject":
+            new_status = "rejected"
+        elif decision == "review":
+            new_status = "review"
+        elif decision == "pending":
+            new_status = "review" if missing else "pending"
+        else:
+            new_status = "review" if missing else "pending"
+        reason = clean_text(payload.review_reason)
+        if new_status == "review" and not reason and missing:
+            reason = "missing required canonical fields: " + ", ".join(missing)
+        cur.execute("""
+          update lead_ops.promotion_candidates
+          set normalized_payload=%s,status=%s,review_reason=%s,updated_at=now()
+          where candidate_id=%s returning *
+        """, (Jsonb(jsonable_encoder(updated_payload)), new_status, reason, candidate_id))
+        new = cur.fetchone()
+        if old["normalized_payload"] == new["normalized_payload"] and old["status"] == new["status"] and old["review_reason"] == new["review_reason"]:
+            return {"changed": False, "candidate": new, "missing_required_fields": missing, "canonical_writes_performed": 0}
+        cur.execute(
+            "insert into lead_audit.lead_changes(lead_id,action,old_data,new_data,actor) values(NULL,%s,%s,%s,%s)",
+            (f"promotion_candidate.{new_status}", Jsonb(jsonable_encoder(old)), Jsonb(jsonable_encoder(new)), actor),
+        )
+        return {"changed": True, "candidate": new, "missing_required_fields": missing, "canonical_writes_performed": 0}
+
+@app.post("/api/promotion-candidates/{candidate_id}/promote", status_code=201)
+def promote_candidate(candidate_id: UUID, payload: PromotionRequest):
+    actor = clean_text(payload.actor) or "dashboard"
+    with db() as (_, cur):
+        cur.execute("select * from lead_ops.promotion_candidates where candidate_id=%s for update", (candidate_id,))
+        candidate = cur.fetchone()
+        if not candidate:
+            raise HTTPException(404, "promotion candidate not found")
+        if candidate["status"] == "promoted":
+            cur.execute("select * from leads.leads where lead_id=%s", (candidate["promoted_lead_id"],))
+            lead = cur.fetchone()
+            return {"promoted": False, "candidate": candidate, "lead": lead, "canonical_writes_performed": 0}
+        if candidate["status"] != "approved":
+            raise HTTPException(409, {"message": "candidate must be explicitly approved before promotion", "status": candidate["status"]})
+        cur.execute("select * from lead_ops.import_batches where import_batch_id=%s for update", (candidate["import_batch_id"],))
+        batch = cur.fetchone()
+        if not batch:
+            raise HTTPException(404, "import batch not found")
+        metadata = batch.get("metadata") or {}
+        if metadata.get("provenance_manifest_verified") is not True:
+            raise HTTPException(403, "import batch provenance_manifest_verified is not true")
+        if metadata.get("promotion_authorized") is not True:
+            raise HTTPException(403, "import batch promotion_authorized is not true")
+        if batch["status"] != "completed":
+            raise HTTPException(409, {"message": "import batch must be completed before promotion", "status": batch["status"]})
+        try:
+            canonical = LeadCreate.model_validate(candidate["normalized_payload"])
+        except Exception as exc:
+            raise HTTPException(422, f"candidate failed canonical validation: {exc}") from exc
+        data = canonical.model_dump()
+        for key, value in list(data.items()):
+            if isinstance(value, str):
+                data[key] = clean_text(value)
+        if not data.get("source_file"):
+            data["source_file"] = clean_text(batch.get("source_location"))
+        fp = fingerprint(data)
+        cur.execute("select pg_advisory_xact_lock(hashtextextended(%s,0))", (fp,))
+        cur.execute("select lead_id,business_name from leads.leads where duplicate_fingerprint=%s and status<>'archived' limit 1", (fp,))
+        duplicate = cur.fetchone()
+        if duplicate:
+            raise HTTPException(409, {"message": "canonical exact duplicate exists", "existing": jsonable_encoder(duplicate)})
+        cols = list(data.keys()) + ["import_batch_id", "duplicate_fingerprint"]
+        vals = [data[k] for k in data] + [candidate["import_batch_id"], fp]
+        placeholders = ",".join(["%s"] * len(vals))
+        cur.execute(f"insert into leads.leads ({','.join(cols)}) values ({placeholders}) returning *", vals)
+        lead = cur.fetchone()
+        cur.execute(
+            "insert into lead_audit.lead_changes(lead_id,action,new_data,actor) values(%s,'promotion.create',%s,%s)",
+            (lead["lead_id"], Jsonb({"candidate_id": str(candidate_id), "lead": jsonable_encoder(lead)}), actor),
+        )
+        cur.execute(
+            "insert into lead_ops.outbox(event_type,aggregate_id,payload) values('lead.created',%s,%s)",
+            (lead["lead_id"], Jsonb({"lead_id": str(lead["lead_id"]), "candidate_id": str(candidate_id), "import_batch_id": str(candidate["import_batch_id"])})),
+        )
+        cur.execute("""
+          update lead_ops.promotion_candidates
+          set status='promoted',promoted_lead_id=%s,promoted_at=now(),updated_at=now()
+          where candidate_id=%s returning *
+        """, (lead["lead_id"], candidate_id))
+        promoted = cur.fetchone()
+        cur.execute("update lead_ops.import_batches set rows_accepted=rows_accepted+1 where import_batch_id=%s", (candidate["import_batch_id"],))
+        return {"promoted": True, "candidate": promoted, "lead": lead, "canonical_writes_performed": 1}
 
 @app.get("/api/export/thunderbird.vcf")
 def export_thunderbird_vcf(

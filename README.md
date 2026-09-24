@@ -26,7 +26,9 @@ Provide one searchable, editable, auditable lead workspace with Monday-style vie
 
 Allowed write paths:
 
-`Meltano -> lead_import_raw`
+`Meltano -> lead_import_raw + append-only row provenance manifest`
+
+`raw provenance -> Leads API promotion candidate -> explicit review/approval -> canonical leads + audit/outbox`
 
 `Leads API -> canonical leads + audit`
 
@@ -40,3 +42,8 @@ Executive · All Leads · Kanban · By Country · By Business · My Work · Data
 
 Linear project: Leads Workstation — Ubuntu Desktop  
 Notion workstation: Codestra — Leads Workstation
+
+
+### Promotion safety gate
+
+The backup workstation does not promote raw rows directly. `lead_ops.import_row_manifest` binds a candidate to an exact staged batch/row/fingerprint tuple. Candidate queue/review operations perform zero canonical writes. Canonical promotion is allowed only for an explicitly approved candidate whose batch is completed and has both `provenance_manifest_verified=true` and `promotion_authorized=true`. The currently frozen real batch remains `promotion_authorized=false` until the release authority changes it through a governed checkpoint.
