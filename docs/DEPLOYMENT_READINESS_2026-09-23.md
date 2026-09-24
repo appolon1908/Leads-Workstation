@@ -89,3 +89,18 @@ Latest protected backup after this extension:
 SHA-256: `599d744eb48281a59f5449d0abda9c609f5a235b221d58c3cc3e94e4ef2a637d`
 
 Disposable restore verified 4 schemas, 8 contract tables, 104,677 manifest rows, 104,677 raw authority rows, canonical count `0`, and the real-batch promotion gate still closed.
+## PAS-273/PAS-274 browser interaction verification — 2026-09-24
+
+Implemented and verified on the localhost-only backup workstation:
+
+- Added composable Owner and Priority controls alongside Search, Country, Business Category, and Status.
+- Added local-browser saved views; saved-view state is browser-local preference data and never becomes canonical lead authority.
+- Added a Lead Focus drill-down with explicit edit action, record details, activity history, and comment/note creation.
+- Added `GET /api/leads/{lead_id}/activity` to provide deterministic activity readback.
+- Synthetic API verification proved owner-only, priority-only, and Country + Business Category + Owner + Priority composed filters each returned exactly the intended lead.
+- Headless Chrome verified all workstation views activate, the synthetic lead drills into Lead Focus, activity readback renders, a browser-created note is readable, and a saved view restores DR / Automation QA / QA Backup / high filters.
+- Browser verification recorded no JavaScript exceptions, browser error-log entries, or failed network requests.
+- All synthetic lead/activity/audit/outbox records created for this verification were removed; canonical lead count returned to `0`; the pre-existing four pending outbox evidence records remain preserved.
+
+Hosted GitHub Actions remains a separate release gate and is still not represented as green.
+

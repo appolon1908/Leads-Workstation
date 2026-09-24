@@ -38,6 +38,13 @@ Allowed write paths:
 
 Executive · All Leads · Kanban · By Country · By Business · My Work · Data Quality · Import History · Lead Focus.
 
+### Local workboard interaction contract
+
+- Global filters compose independently across search, Country, Business Category, Status, Owner, and Priority.
+- Saved views are local-browser preferences stored only on the backup workstation; they are not canonical lead data.
+- Lead Focus is the record drill-down surface and includes local CRM activity/comments.
+- Activity notes never send email/SMS/calls and do not activate downstream providers.
+
 ## Control plane
 
 Linear project: Leads Workstation — Ubuntu Desktop  

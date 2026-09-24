@@ -398,6 +398,18 @@ def update_lead(lead_id: UUID, payload: LeadUpdate):
                     (lead_id, Jsonb({"lead_id":str(lead_id),"fields":list(changes.keys())})))
         return new
 
+@app.get("/api/leads/{lead_id}/activity")
+def list_activity(lead_id: UUID, limit: int = Query(default=100, ge=1, le=500)):
+    with db() as (_, cur):
+        cur.execute("select 1 from leads.leads where lead_id=%s", (lead_id,))
+        if not cur.fetchone():
+            raise HTTPException(404, "lead not found")
+        cur.execute("""select activity_id,lead_id,activity_type,body,actor,created_at
+                       from leads.lead_activity where lead_id=%s
+                       order by created_at desc, activity_id desc limit %s""",
+                    (lead_id, limit))
+        return cur.fetchall()
+
 @app.post("/api/leads/{lead_id}/activity", status_code=201)
 def add_activity(lead_id: UUID, payload: ActivityCreate):
     with db() as (_, cur):
