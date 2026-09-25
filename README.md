@@ -34,6 +34,15 @@ Allowed write paths:
 
 `n8n -> Leads API / governed command`
 
+## MCR lifecycle / journey read model
+
+MCR-B adds a tenant-bound, read-only Lifecycle & Journey surface. It consumes Middleware MCR-C
+authority and never computes campaign eligibility or executes provider effects. Projection schema
+ownership remains in `Database-migrations-`; missing projection tables fail closed with an explicit
+unavailable response.
+
+See `contracts/mcr-leads-read-model.v1.json` and `docs/MCR_B_PROJECTION_REQUIREMENTS.md`.
+
 ## Required views
 
 Executive · All Leads · Kanban · By Country · By Business · My Work · Data Quality · Import History · Lead Focus.
