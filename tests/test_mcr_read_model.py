@@ -69,6 +69,8 @@ def test_tenant_context_fails_closed_and_rejects_cross_tenant():
 def test_status_is_read_only_and_reports_projection_readiness():
     cursor = FakeCursor(fetchones=[{
         "lead_projection": "leads.mcr_lead_projection",
+        "channel_health_projection": "leads.mcr_channel_health_projection",
+        "suppression_projection": "leads.mcr_suppression_projection",
         "exposure_projection": "leads.mcr_exposure_projection",
         "delivery_projection": "leads.mcr_delivery_projection",
     }])
@@ -80,6 +82,22 @@ def test_status_is_read_only_and_reports_projection_readiness():
     assert body["authority"]["decisioning"] == "Middleware MCR-C"
     assert len(cursor.executed) == 1
     assert cursor.executed[0][1] is None
+
+
+def test_status_requires_all_projection_tables():
+    cursor = FakeCursor(fetchones=[{
+        "lead_projection": "leads.mcr_lead_projection",
+        "channel_health_projection": "leads.mcr_channel_health_projection",
+        "suppression_projection": None,
+        "exposure_projection": "leads.mcr_exposure_projection",
+        "delivery_projection": "leads.mcr_delivery_projection",
+    }])
+    response = client_for(cursor).get("/api/mcr/status", headers=headers())
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is False
+    assert body["projection_ready"] is False
+    assert body["provider_effects"] == "none"
 
 
 def test_summary_is_tenant_bound_and_contains_projection_state():

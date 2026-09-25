@@ -198,6 +198,8 @@ def build_mcr_router(db_factory: Callable[[], Any]) -> APIRouter:
                 cur.execute(
                     """
                     select to_regclass('leads.mcr_lead_projection') lead_projection,
+                           to_regclass('leads.mcr_channel_health_projection') channel_health_projection,
+                           to_regclass('leads.mcr_suppression_projection') suppression_projection,
                            to_regclass('leads.mcr_exposure_projection') exposure_projection,
                            to_regclass('leads.mcr_delivery_projection') delivery_projection
                     """
@@ -205,7 +207,16 @@ def build_mcr_router(db_factory: Callable[[], Any]) -> APIRouter:
                 row = cur.fetchone() or {}
         except Exception as exc:
             raise _projection_unavailable(exc) from exc
-        ready = all(row.get(key) for key in ("lead_projection", "exposure_projection", "delivery_projection"))
+        ready = all(
+            row.get(key)
+            for key in (
+                "lead_projection",
+                "channel_health_projection",
+                "suppression_projection",
+                "exposure_projection",
+                "delivery_projection",
+            )
+        )
         return {
             "ok": ready,
             "tenant_id": ctx.tenant_id,
