@@ -217,6 +217,9 @@ def test_ui_declares_mcr_lifecycle_states_and_unavailable_state():
         "cooling",
         "suppressed",
         "converted",
+        "Active suppressions",
+        "summary.suppressions",
+        "No active suppressions projected.",
     ):
         assert marker in html
 
