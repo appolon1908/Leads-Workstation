@@ -26,17 +26,40 @@ Provide one searchable, editable, auditable lead workspace with Monday-style vie
 
 Allowed write paths:
 
-`Meltano -> lead_import_raw`
+`Meltano -> lead_import_raw + append-only row provenance manifest`
+
+`raw provenance -> Leads API promotion candidate -> explicit review/approval -> canonical leads + audit/outbox`
 
 `Leads API -> canonical leads + audit`
 
 `n8n -> Leads API / governed command`
 
+## MCR lifecycle / journey read model
+
+MCR-B adds a tenant-bound, read-only Lifecycle & Journey surface. It consumes Middleware MCR-C
+authority and never computes campaign eligibility or executes provider effects. Projection schema
+ownership remains in `Database-migrations-`; missing projection tables fail closed with an explicit
+unavailable response.
+
+See `contracts/mcr-leads-read-model.v1.json` and `docs/MCR_B_PROJECTION_REQUIREMENTS.md`.
+
 ## Required views
 
 Executive · All Leads · Kanban · By Country · By Business · My Work · Data Quality · Import History · Lead Focus.
+
+### Local workboard interaction contract
+
+- Global filters compose independently across search, Country, Business Category, Status, Owner, and Priority.
+- Saved views are local-browser preferences stored only on the backup workstation; they are not canonical lead data.
+- Lead Focus is the record drill-down surface and includes local CRM activity/comments.
+- Activity notes never send email/SMS/calls and do not activate downstream providers.
 
 ## Control plane
 
 Linear project: Leads Workstation — Ubuntu Desktop  
 Notion workstation: Codestra — Leads Workstation
+
+
+### Promotion safety gate
+
+The backup workstation does not promote raw rows directly. `lead_ops.import_row_manifest` binds a candidate to an exact staged batch/row/fingerprint tuple. Candidate queue/review operations perform zero canonical writes. Canonical promotion is allowed only for an explicitly approved candidate whose batch is completed and has both `provenance_manifest_verified=true` and `promotion_authorized=true`. The currently frozen real batch remains `promotion_authorized=false` until the release authority changes it through a governed checkpoint.

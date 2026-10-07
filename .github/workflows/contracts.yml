@@ -3,18 +3,23 @@ on:
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  contents: read
+
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, codestra-backup-ci]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
       - name: Validate JSON contracts
         run: |
           python -m json.tool contracts/integration-map.v1.json >/dev/null
           python -m json.tool contracts/lead-record.schema.json >/dev/null
+          python -m json.tool contracts/mcr-leads-read-model.v1.json >/dev/null
       - name: Verify country and business fields are distinct
         run: |
           python - <<'PY'
@@ -25,3 +30,7 @@ jobs:
           assert "country" != "business_category"
           print("lead contract OK")
           PY
+      - name: Run MCR-B read-model tests
+        run: |
+          python -m pip install -r requirements.txt pytest httpx2
+          python -m pytest -q tests/test_mcr_read_model.py
