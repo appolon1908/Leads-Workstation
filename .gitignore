@@ -12,3 +12,5 @@ data/manifests/private-*
 *.sqlite3
 *.db
 *.egg-info/
+
+*.bak.*
