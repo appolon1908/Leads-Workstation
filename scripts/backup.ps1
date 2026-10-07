@@ -14,3 +14,6 @@ if (Test-Path (Join-Path $Root "data\manifests\private-local.json")) {
 }
 Get-FileHash (Join-Path $dest "leads.db") -Algorithm SHA256 | Format-List
 Write-Host "Backup created: $dest"
+
+$global:LASTEXITCODE = 0
+exit 0
