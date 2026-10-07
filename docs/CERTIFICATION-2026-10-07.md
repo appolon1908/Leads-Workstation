@@ -1,24 +1,28 @@
 # Certification — 2026-10-07
 
-## Result
+## Current certified result
 
 The Leads Workstation runtime was implemented and exercised on the connected Codestra laptop.
 
 Certified evidence:
 
-- source master rows seen: 88,379
-- canonical runtime rows inserted: 88,379
-- unintended duplicate collapses: 0
+- baseline master rows: 88,379
+- promoted governed candidate records: 107
+- current canonical lead total: 88,486
 - rows with normalized email: 87,958
-- rows with normalized phone: 86,762
+- rows with normalized phone: 86,869
+- candidate batch appraisers-2019-20190605: 107 promoted, 0 failed
+- candidate source contacts: 107 named appraisers
+- candidate source distinct phones: 229
+- strict reconciliation against the baseline master: 0 name overlaps, 0 phone overlaps
 - private staged lead/source files: 118
 - private staged bytes: 214,910,524
 - source master SHA-256: 643462c77284ae2b36fbdddb0847f33c5cacee23014cf64cdb4af3d44ad44b2e
-- Python unit tests: passed
+- Python unit tests: 8 passed
 - Python compile check: passed
 - live local API health check: passed
-- live API lead total: 88,379
-- filtered API query: passed
+- live API lead total: 88,486
+- candidate summary API: passed
 
 ## Implemented behavior
 
@@ -31,14 +35,20 @@ Certified evidence:
 - import-batch ledger with source SHA-256
 - per-lead audit events
 - duplicate review ledger
+- candidate lead staging/review ledger
+- XLSX first-sheet parser for the historical appraiser package
+- candidate matching by normalized names and phones
+- promotion of only records classified as new
+- historical candidates promoted with status Needs Verification
+- candidate summary and listing API endpoints
 - local create/update/search API
 - loopback-only service by default
 - private-data staging and manifest generation
 - repeatable install, import, start, backup and certification scripts
-- CI runs contract validation, unit tests and compilation
+- CI runs contract validation, unit tests, compilation and required Codestra control-plane jobs
 
 ## Data publication status
 
-The repository was public when implementation began. Lead/contact payloads are therefore protected under the git-ignored data/private directory. No lead PII was committed or pushed to the public repository.
+The repository is still public. Lead/contact payloads are therefore protected under the git-ignored data/private directory. No lead PII is committed or pushed to the public repository.
 
-The code can be promoted through the governed branch flow. Raw lead data may only be published after the GitHub repository is verified PRIVATE.
+The code may continue through the governed branch flow. Raw lead data may only be published after repository visibility is verified PRIVATE.

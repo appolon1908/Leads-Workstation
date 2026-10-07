@@ -55,3 +55,32 @@ Allowed writes:
 ## Sensitive lead data
 
 The GitHub repository was public when this implementation started. The actual lead payload is staged locally under data/private and is git-ignored until repository privacy is verified as PRIVATE. No lead PII should be committed to a public branch.
+
+## Candidate review lane
+
+New lead sources do not write directly into the canonical lead table.
+
+The candidate workflow is:
+
+1. Parse and normalize the incoming source.
+2. Compare normalized names and all available phone values against canonical leads.
+3. Store the batch in candidate_leads with a disposition.
+4. Keep possible matches in review.
+5. Promote only records classified as new.
+6. Mark historical/unverified records as Needs Verification.
+7. Preserve candidate provenance and the resulting canonical lead ID.
+
+Current governed candidate batch:
+
+- appraisers-2019-20190605
+- 107 named Dominican Republic property appraisers
+- 229 distinct historical phone numbers
+- 0 master phone overlaps
+- 0 master name overlaps
+- 107 promoted
+- current canonical total: 88,486
+
+Candidate API:
+
+- GET /api/candidates
+- GET /api/candidates/summary

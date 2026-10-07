@@ -86,6 +86,28 @@ CREATE TABLE IF NOT EXISTS duplicate_review (
     created_at TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending'
 );
+CREATE TABLE IF NOT EXISTS candidate_leads (
+    candidate_id TEXT PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    contact_name TEXT NOT NULL,
+    business_name TEXT NOT NULL,
+    country TEXT NOT NULL,
+    business_category TEXT NOT NULL,
+    phones_json TEXT,
+    email TEXT,
+    notes TEXT,
+    source_file TEXT NOT NULL,
+    source_row INTEGER,
+    source_fingerprint TEXT NOT NULL UNIQUE,
+    match_lead_id TEXT,
+    match_reason TEXT,
+    disposition TEXT NOT NULL DEFAULT 'new',
+    source_payload TEXT,
+    created_at TEXT NOT NULL,
+    promoted_at TEXT,
+    FOREIGN KEY(match_lead_id) REFERENCES leads(lead_id)
+);
+CREATE INDEX IF NOT EXISTS idx_candidate_batch ON candidate_leads(batch_id, disposition);
 """
 
 def now_utc() -> str:

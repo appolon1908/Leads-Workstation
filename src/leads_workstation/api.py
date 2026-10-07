@@ -5,6 +5,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+from .candidates import candidate_summary, list_candidates
 from .db import (
     DuplicateLeadError,
     create_lead,
@@ -18,7 +19,7 @@ from .db import (
 INDEX = """<!doctype html><html><head><meta charset="utf-8"><title>Codestra Leads Workstation</title>
 <style>body{font-family:system-ui;margin:2rem;max-width:1400px}table{width:100%;border-collapse:collapse}th,td{padding:.5rem;border-bottom:1px solid #ddd;text-align:left}input{padding:.6rem;width:420px}button{padding:.6rem}</style></head>
 <body><h1>Codestra Leads Workstation</h1><p>Local-only lead operations runtime.</p>
-<p>JSON endpoints: /api/stats, /api/leads?q=search, POST /api/leads, PATCH /api/leads/{id}</p></body></html>"""
+<p>JSON endpoints: /api/stats, /api/leads?q=search, /api/candidates, /api/candidates/summary, POST /api/leads, PATCH /api/leads/{id}</p></body></html>"""
 
 MAX_BODY_BYTES = 1024 * 1024
 
@@ -72,6 +73,22 @@ def make_handler(db_path):
 
             if parsed.path == "/api/stats":
                 self.send_json(stats(db_path))
+                return
+
+            if parsed.path == "/api/candidates/summary":
+                q = parse_qs(parsed.query)
+                self.send_json(candidate_summary(db_path, q.get("batch_id", [None])[0]))
+                return
+
+            if parsed.path == "/api/candidates":
+                q = parse_qs(parsed.query)
+                items = list_candidates(
+                    db_path,
+                    batch_id=q.get("batch_id", [None])[0],
+                    disposition=q.get("disposition", [None])[0],
+                    limit=int(q.get("limit", ["100"])[0]),
+                )
+                self.send_json({"items": items, "count": len(items)})
                 return
 
             if parsed.path == "/api/leads":
