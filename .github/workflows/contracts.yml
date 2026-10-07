@@ -3,6 +3,7 @@ on:
   pull_request:
   push:
     branches: [development, testing, staging, main]
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -30,3 +31,29 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Compile
         run: python -m compileall -q src
+
+  codestra_control_plane:
+    name: codestra-control-plane
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce lead data privacy and certification evidence
+        run: |
+          printf '%s\n' 'data/private/sample.csv' | git check-ignore --stdin
+          test -f docs/CERTIFICATION-2026-10-07.md
+          grep -q '88,379' docs/CERTIFICATION-2026-10-07.md
+          grep -q 'Lead/contact payload must never be pushed to a public repository' AGENTS.md
+
+  codestra_control_plane_legacy:
+    name: codestra/control-plane
+    needs: [validate, codestra_control_plane]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify governed workstation artifacts
+        run: |
+          test -f scripts/certify.ps1
+          test -f scripts/stage-private-data.ps1
+          test -f src/leads_workstation/db.py
+          test -f tests/test_import.py
