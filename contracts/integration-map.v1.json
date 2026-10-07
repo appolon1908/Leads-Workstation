@@ -5,7 +5,10 @@
     "canonical_leads": "Leads-Workstation",
     "schema_and_migrations": "Database-migrations-",
     "ingestion": "Meltano-Leads-Importer",
-    "downstream_automation": "N8N"
+    "downstream_automation": "N8N",
+    "mcr_decisioning": "Middleware MCR-C",
+    "mcr_read_model": "Leads-Workstation",
+    "mcr_projection_schema": "Database-migrations-"
   },
   "integrations": [
     {
@@ -37,6 +40,18 @@
       "to": "all",
       "contract": "schema/role/migration compatibility",
       "mode": "release dependency"
+    },
+    {
+      "from": "Middleware MCR-C",
+      "to": "Leads-Workstation",
+      "contract": "read-only lifecycle/journey/next-action projection input; no decision authority transfer",
+      "mode": "governed API/projection"
+    },
+    {
+      "from": "Leads-Workstation",
+      "to": "Browser UI",
+      "contract": "tenant-bound lifecycle/journey/exposure read model only",
+      "mode": "read-only"
     }
   ],
   "invariants": [
@@ -44,6 +59,9 @@
     "imports are idempotent by batch/fingerprint",
     "raw import rows never silently become canonical leads",
     "uncertain duplicates enter review queue",
-    "every canonical write is auditable"
+    "every canonical write is auditable",
+    "MCR eligibility, suppression policy, execution and reconciliation remain Middleware authority",
+    "MCR browser/API surfaces are read-only and tenant-bound",
+    "missing MCR projection storage fails closed as unavailable rather than false empty"
   ]
 }

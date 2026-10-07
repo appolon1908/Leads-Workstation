@@ -251,6 +251,9 @@ def candidate_missing(data: dict[str, Any]) -> list[str]:
 
 app = FastAPI(title="Codestra Leads Workstation", version="0.1.0")
 
+from app.mcr_read_model import build_mcr_router
+app.include_router(build_mcr_router(db))
+
 @app.get("/")
 def home():
     return FileResponse(STATIC / "index.html")
