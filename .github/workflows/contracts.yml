@@ -1,8 +1,9 @@
-name: contracts
+name: leads-workstation-ci
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [development, testing, staging, main]
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -10,8 +11,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-      - name: Validate JSON contracts
+          python-version: "3.12"
+      - name: Validate contracts
         run: |
           python -m json.tool contracts/integration-map.v1.json >/dev/null
           python -m json.tool contracts/lead-record.schema.json >/dev/null
@@ -20,8 +21,39 @@ jobs:
           python - <<'PY'
           import json
           p=json.load(open("contracts/lead-record.schema.json"))["properties"]
-          assert "country" in p
-          assert "business_category" in p
+          assert "country" in p and "business_category" in p
           assert "country" != "business_category"
           print("lead contract OK")
           PY
+      - name: Unit tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+      - name: Compile
+        run: python -m compileall -q src
+
+  codestra_control_plane:
+    name: codestra-control-plane
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce lead data privacy and certification evidence
+        run: |
+          printf '%s\n' 'data/private/sample.csv' | git check-ignore --stdin
+          test -f docs/CERTIFICATION-2026-10-07.md
+          grep -q '88,379' docs/CERTIFICATION-2026-10-07.md
+          grep -q 'Lead/contact payload must never be pushed to a public repository' AGENTS.md
+
+  codestra_control_plane_legacy:
+    name: codestra/control-plane
+    needs: [validate, codestra_control_plane]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify governed workstation artifacts
+        run: |
+          test -f scripts/certify.ps1
+          test -f scripts/stage-private-data.ps1
+          test -f src/leads_workstation/db.py
+          test -f tests/test_import.py
