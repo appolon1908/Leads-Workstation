@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import csv
 import hashlib
 import json
@@ -21,7 +22,7 @@ def csv_rows(path: Path):
             reader = csv.reader(fh)
             next(reader, None)
             return sum(1 for _ in reader)
-    except Exception:
+    except (OSError, UnicodeError, csv.Error):
         return None
 
 def build_manifest(root):

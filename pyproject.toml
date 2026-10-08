@@ -4,10 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codestra-leads-workstation"
-version = "0.1.0"
-description = "Local-first lead operations workstation with auditable import and dedupe."
+version = "0.2.0"
+description = "Codestra lead operations platform with governed imports, campaigns, RBAC, compliance and event delivery."
 requires-python = ">=3.11"
 dependencies = []
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2,<4"]
+auth = ["PyJWT[crypto]>=2.10,<3"]
+redis = ["redis>=5,<7"]
+crypto = ["cryptography>=43,<47"]
+production = [
+  "psycopg[binary]>=3.2,<4",
+  "PyJWT[crypto]>=2.10,<3",
+  "redis>=5,<7",
+  "cryptography>=43,<47",
+]
 
 [project.scripts]
 leads-workstation = "leads_workstation.cli:main"

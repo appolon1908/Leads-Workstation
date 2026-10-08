@@ -4,7 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from leads_workstation.candidates import candidate_summary, list_candidates, promote_new_candidates
+from leads_workstation.candidates import (
+    candidate_summary,
+    list_candidates,
+    promote_new_candidates,
+)
 from leads_workstation.db import db_connection, get_lead, init_db, now_utc, stats
 
 

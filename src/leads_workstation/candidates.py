@@ -3,11 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import posixpath
-import re
-import uuid
 import unicodedata
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -61,7 +59,7 @@ def read_first_sheet(path: str | Path) -> list[tuple[int, list[str]]]:
                     if kind == "s" and raw:
                         try:
                             val = shared[int(raw)]
-                        except Exception:
+                        except (IndexError, ValueError):
                             val = raw
                     else:
                         val = raw
@@ -271,7 +269,7 @@ def promote_new_candidates(db_path: str | Path, batch_id: str, actor: str = "can
                     (lead["lead_id"], now_utc(), row["candidate_id"]),
                 )
             promoted += 1
-        except Exception:
+        except Exception:  # noqa: BLE001 - batch promotion records per-row failure and continues
             failed += 1
     return {"promoted": promoted, "failed": failed}
 
