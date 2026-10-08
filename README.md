@@ -84,3 +84,16 @@ Candidate API:
 
 - GET /api/candidates
 - GET /api/candidates/summary
+
+
+## V2 platform branch
+
+Leads Workstation V2 expands the certified local runtime into a standalone multi-user lead management service.
+
+V2 adds PostgreSQL, Keycloak RBAC, campaigns, assignment routing, lifecycle enforcement, contact verification, compliance/DNC, optimistic locking, weighted duplicate review, transactional outbox/webhooks, Redis integration, Prometheus metrics, encrypted backups and an authenticated operations dashboard.
+
+Architecture: docs/V2-ARCHITECTURE.md
+
+Certification: docs/V2-CERTIFICATION-2026-10-07.md
+
+Production code remains data-free. Raw lead/contact payload must stay outside Git unless the repository and the selected data-publication design have been independently verified appropriate for PII storage.

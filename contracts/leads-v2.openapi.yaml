@@ -1,0 +1,282 @@
+openapi: 3.1.0
+info:
+  title: Codestra Leads Workstation V2 API
+  version: 2.0.0
+  description: Governed lead-management API for campaigns, lifecycle, compliance and integrations.
+servers:
+  - url: https://leads.internal.example
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      security: []
+      summary: Liveness
+      responses:
+        "200":
+          description: Service is alive
+  /ready:
+    get:
+      security: []
+      summary: Database readiness
+      responses:
+        "200":
+          description: Service and database are ready
+  /api/v2/me:
+    get:
+      summary: Current identity and scopes
+      responses:
+        "200":
+          description: Authenticated identity
+        "401":
+          description: Missing or invalid identity
+  /api/v2/stats:
+    get:
+      summary: Lead operational statistics
+      responses:
+        "200":
+          description: Statistics
+  /api/v2/campaigns:
+    get:
+      summary: List campaigns in caller scope
+      responses:
+        "200":
+          description: Campaign list
+    post:
+      summary: Create campaign
+      responses:
+        "201":
+          description: Campaign created
+  /api/v2/campaigns/{campaign_id}:
+    patch:
+      summary: Update campaign
+      parameters:
+        - $ref: "#/components/parameters/CampaignId"
+      responses:
+        "200":
+          description: Campaign updated
+  /api/v2/campaigns/{campaign_id}/members:
+    get:
+      summary: List campaign members
+      parameters:
+        - $ref: "#/components/parameters/CampaignId"
+      responses:
+        "200":
+          description: Member list
+    post:
+      summary: Add or update campaign member
+      parameters:
+        - $ref: "#/components/parameters/CampaignId"
+      responses:
+        "201":
+          description: Membership saved
+  /api/v2/leads:
+    get:
+      summary: Search leads in caller scope
+      parameters:
+        - in: query
+          name: q
+          schema: {type: string}
+        - in: query
+          name: country
+          schema: {type: string}
+        - in: query
+          name: category
+          schema: {type: string}
+        - in: query
+          name: status
+          schema: {type: string}
+        - in: query
+          name: campaign_id
+          schema: {type: string}
+        - in: query
+          name: assigned_agent
+          schema: {type: string}
+      responses:
+        "200":
+          description: Lead list
+    post:
+      summary: Create lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LeadCreate"
+      responses:
+        "201":
+          description: Lead created
+        "409":
+          description: Duplicate candidate
+  /api/v2/leads/{lead_id}:
+    get:
+      summary: Get lead
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Lead
+        "403":
+          description: Outside caller scope
+    patch:
+      summary: Optimistically update lead
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+        - in: header
+          name: If-Match
+          required: true
+          schema: {type: string}
+          description: Numeric lead version, quoted or unquoted.
+      responses:
+        "200":
+          description: Updated lead
+        "409":
+          description: Version or duplicate conflict
+  /api/v2/leads/{lead_id}/contacts:
+    get:
+      summary: List lead contact points
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Contact points
+    post:
+      summary: Add contact point
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "201":
+          description: Contact point added
+  /api/v2/contact-points/{contact_point_id}/verify:
+    post:
+      summary: Set verification status for a lead contact point
+      parameters:
+        - in: path
+          name: contact_point_id
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Contact point verification updated
+        "403":
+          description: Contact point belongs to a lead outside caller scope
+        "404":
+          description: Contact point not found
+  /api/v2/leads/{lead_id}/assign:
+    post:
+      summary: Assign lead directly or round-robin
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Lead assigned
+        "409":
+          description: Suppressed, stale or invalid assignment
+  /api/v2/leads/{lead_id}/transition:
+    post:
+      summary: Transition lifecycle state
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Lead transitioned
+        "409":
+          description: Invalid or suppressed transition
+  /api/v2/leads/{lead_id}/suppress:
+    post:
+      summary: Add channel or global suppression
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Suppression applied
+  /api/v2/leads/{lead_id}/unsuppress:
+    post:
+      summary: Lift an active suppression
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Suppression lifted
+  /api/v2/leads/{lead_id}/consent:
+    post:
+      summary: Record consent state
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Consent recorded
+  /api/v2/leads/{lead_id}/events:
+    get:
+      summary: Read lead audit events
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Audit events
+  /api/v2/dedupe/preview:
+    post:
+      summary: Score possible duplicates without writing
+      responses:
+        "200":
+          description: Scored candidates
+  /api/v2/candidates:
+    get:
+      summary: List candidate review rows
+      responses:
+        "200":
+          description: Candidate list
+  /api/v2/outbox:
+    get:
+      summary: Inspect integration outbox
+      responses:
+        "200":
+          description: Outbox events
+  /api/v2/webhooks:
+    get:
+      summary: List webhook subscriptions with secret references redacted
+      responses:
+        "200":
+          description: Webhook subscriptions
+    post:
+      summary: Register webhook subscription
+      responses:
+        "201":
+          description: Subscription created
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    LeadId:
+      in: path
+      name: lead_id
+      required: true
+      schema: {type: string}
+    CampaignId:
+      in: path
+      name: campaign_id
+      required: true
+      schema: {type: string}
+  schemas:
+    LeadCreate:
+      type: object
+      required: [business_name, country, business_category]
+      properties:
+        business_name: {type: string}
+        contact_name: {type: [string, "null"]}
+        country: {type: string}
+        state_province: {type: [string, "null"]}
+        city: {type: [string, "null"]}
+        business_category: {type: string}
+        email: {type: [string, "null"]}
+        phone: {type: [string, "null"]}
+        website: {type: [string, "null"]}
+        campaign_id: {type: [string, "null"]}
+        assigned_agent: {type: [string, "null"]}
+        status: {type: [string, "null"]}
+        consent_status: {type: [string, "null"]}
+        consent_source: {type: [string, "null"]}
+        jurisdiction: {type: [string, "null"]}

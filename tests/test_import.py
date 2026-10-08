@@ -2,7 +2,9 @@ import csv
 import tempfile
 import unittest
 from pathlib import Path
+
 from leads_workstation.db import import_csv, stats
+
 
 class ImportTests(unittest.TestCase):
     def test_import_idempotent(self):

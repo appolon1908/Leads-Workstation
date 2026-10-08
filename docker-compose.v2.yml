@@ -1,0 +1,67 @@
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: leads
+      POSTGRES_USER: leads
+      POSTGRES_PASSWORD: ${LEADS_POSTGRES_PASSWORD:?set LEADS_POSTGRES_PASSWORD}
+    volumes:
+      - leads_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leads -d leads"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - leads_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  app:
+    build: .
+    environment:
+      LEADS_DATABASE_URL: postgresql://leads:${LEADS_POSTGRES_PASSWORD}@postgres:5432/leads
+      REDIS_URL: redis://redis:6379/0
+      LEADS_AUTH_MODE: ${LEADS_AUTH_MODE:-keycloak}
+      LEADS_KEYCLOAK_ISSUER: ${LEADS_KEYCLOAK_ISSUER:-}
+      LEADS_KEYCLOAK_AUDIENCE: ${LEADS_KEYCLOAK_AUDIENCE:-leads-workstation}
+      LEADS_KEYCLOAK_CLIENT_ID: ${LEADS_KEYCLOAK_CLIENT_ID:-leads-workstation}
+      LEADS_KEYCLOAK_JWKS_URL: ${LEADS_KEYCLOAK_JWKS_URL:-}
+      OPENBAO_ADDR: ${OPENBAO_ADDR:-}
+      OPENBAO_TOKEN: ${OPENBAO_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${LEADS_PORT:-8765}:8765"
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["leads-workstation", "worker", "--poll-seconds", "2"]
+    environment:
+      LEADS_DATABASE_URL: postgresql://leads:${LEADS_POSTGRES_PASSWORD}@postgres:5432/leads
+      REDIS_URL: redis://redis:6379/0
+      OPENBAO_ADDR: ${OPENBAO_ADDR:-}
+      OPENBAO_TOKEN: ${OPENBAO_TOKEN:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  leads_postgres_data:
+  leads_redis_data:

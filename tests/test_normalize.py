@@ -1,5 +1,7 @@
 import unittest
+
 from leads_workstation.normalize import fingerprint, normalize_email, normalize_phone
+
 
 class NormalizeTests(unittest.TestCase):
     def test_email(self):

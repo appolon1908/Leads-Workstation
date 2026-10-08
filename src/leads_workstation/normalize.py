@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import hashlib
 import re
-from typing import Mapping
+from collections.abc import Mapping
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 _NON_DIGIT = re.compile(r"\D+")
@@ -51,4 +52,27 @@ def identity_key(row: Mapping[str, object]) -> tuple[str, str]:
 
 def fingerprint(row: Mapping[str, object]) -> str:
     kind, key = identity_key(row)
+    return hashlib.sha256((kind + ":" + key).encode("utf-8")).hexdigest()
+
+
+def identity_key_without_canonical_id(row: Mapping[str, object]) -> tuple[str, str]:
+    """Identity used for mutable/API-created records.
+
+    Unlike identity_key(), this deliberately ignores lead_id so a caller cannot
+    bypass duplicate detection by supplying a fresh arbitrary identifier.
+    """
+    email = normalize_email(first_present(row, "normalized_email_primary", "email_primary", "email"))
+    if email:
+        return "email", email
+    phone = normalize_phone(first_present(row, "normalized_phone_primary", "mobile", "direct_phone", "company_phone", "phone"))
+    if phone:
+        return "phone", phone
+    entity = normalize_text(first_present(row, "company", "business_name", "full_name", "contact_name"))
+    country = normalize_text(first_present(row, "country"))
+    city = normalize_text(first_present(row, "city"))
+    return "entity", entity + "|" + country + "|" + city
+
+
+def identity_fingerprint(row: Mapping[str, object]) -> str:
+    kind, key = identity_key_without_canonical_id(row)
     return hashlib.sha256((kind + ":" + key).encode("utf-8")).hexdigest()
