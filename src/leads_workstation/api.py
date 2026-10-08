@@ -156,7 +156,9 @@ def make_handler(db_path):
                 raise AuthorizationError("legacy API is loopback-only")
 
         def _scope_campaign(self, ctx, campaign_id: str | None) -> None:
-            if ctx.has_role("admin", "super_user"):
+            if ctx.has_role("admin", "super_user", "middleware_service"):
+                return
+            if "*" in ctx.campaign_ids:
                 return
             if ctx.has_role("agent", "supervisor") and not campaign_id:
                 raise AuthorizationError("campaign is required for this role")

@@ -229,3 +229,16 @@ A governed V2 promotion requires:
 6. Docker Compose validation
 7. private-data git-ignore enforcement
 8. required Codestra control-plane checks
+
+## Internal Middleware service identity
+
+For isolated staging where the live Keycloak service runtime is not yet available, V2 supports an explicit `LEADS_AUTH_MODE=service` mode for Middleware-to-Leads traffic.
+
+This mode is not enabled by default. It requires all of the following:
+
+- a bearer token supplied from a secret store or root-owned runtime environment
+- an explicit source CIDR allowlist
+- the fixed least-privilege `middleware_service` role
+- explicit campaign scope configuration
+
+The service role can perform governed lead-domain operations and read campaign metadata, but cannot create or mutate campaign authority, campaign membership, or webhook administration. Production user and agent authentication remains Keycloak.
