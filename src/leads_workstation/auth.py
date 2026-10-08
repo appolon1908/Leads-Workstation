@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+import ipaddress
 import os
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -71,6 +73,20 @@ PERMISSIONS = {
         "campaign:read",
         "candidate:read",
     },
+    "middleware_service": {
+        "lead:read",
+        "lead:create",
+        "lead:update",
+        "lead:assign",
+        "lead:transition",
+        "lead:contact",
+        "lead:suppress",
+        "lead:consent",
+        "campaign:read",
+        "audit:read",
+        "outbox:read",
+        "candidate:read",
+    },
 }
 
 
@@ -89,7 +105,14 @@ def require_permission(ctx: AuthContext, permission: str) -> None:
 
 
 def can_access_lead(ctx: AuthContext, lead: dict) -> bool:
-    if ctx.has_role("admin", "super_user", "auditor", "readonly", "importer"):
+    if ctx.has_role(
+        "admin",
+        "super_user",
+        "auditor",
+        "readonly",
+        "importer",
+        "middleware_service",
+    ):
         return True
     campaign_id = lead.get("campaign_id")
     if ctx.has_role("supervisor"):
@@ -146,8 +169,58 @@ def _cached_jwk_client(jwks_url: str):
     )
 
 
+def _client_ip_allowed(client_ip: str, cidr_csv: str) -> bool:
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return False
+    networks = []
+    for raw in cidr_csv.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(raw, strict=False))
+        except ValueError as exc:
+            raise AuthenticationError("invalid service CIDR configuration") from exc
+    if not networks:
+        raise AuthenticationError("service CIDR allowlist is required")
+    return any(address in network for network in networks)
+
+
 def authenticate(headers, client_ip: str) -> AuthContext:
     mode = os.getenv("LEADS_AUTH_MODE", "closed").strip().lower()
+
+    if mode == "service":
+        expected = os.getenv("LEADS_SERVICE_TOKEN", "")
+        allowed_cidrs = os.getenv("LEADS_SERVICE_ALLOWED_CIDRS", "")
+        if not expected or not allowed_cidrs:
+            raise AuthenticationError("service auth token and CIDR allowlist must be configured")
+        if not _client_ip_allowed(client_ip, allowed_cidrs):
+            raise AuthenticationError("service caller address is not allowed")
+        auth = _header(headers, "Authorization")
+        if not auth.lower().startswith("bearer "):
+            raise AuthenticationError("bearer token required")
+        supplied = auth.split(None, 1)[1]
+        if not hmac.compare_digest(supplied, expected):
+            raise AuthenticationError("invalid service token")
+        subject = os.getenv("LEADS_SERVICE_SUBJECT", "middleware-service").strip()
+        if not subject:
+            raise AuthenticationError("service subject must be configured")
+        campaigns_raw = os.getenv("LEADS_SERVICE_CAMPAIGNS", "*")
+        campaigns = frozenset(
+            value.strip()
+            for value in campaigns_raw.split(",")
+            if value.strip()
+        )
+        if not campaigns:
+            raise AuthenticationError("service campaign scope must be configured")
+        return AuthContext(
+            subject=subject,
+            roles=frozenset({"middleware_service"}),
+            campaign_ids=campaigns,
+            issuer="internal-service",
+        )
 
     if mode == "dev":
         if client_ip not in {"127.0.0.1", "::1", "localhost"}:
@@ -215,6 +288,6 @@ def authenticate(headers, client_ip: str) -> AuthContext:
         return context_from_claims(claims, client_id)
 
     raise AuthenticationError(
-        "V2 API is fail-closed. Set LEADS_AUTH_MODE=dev for loopback development "
-        "or LEADS_AUTH_MODE=keycloak for authenticated operation."
+        "V2 API is fail-closed. Set LEADS_AUTH_MODE=dev for loopback development, "
+        "service for allowlisted internal service calls, or keycloak for authenticated operation."
     )
