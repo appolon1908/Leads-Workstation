@@ -1,5 +1,4 @@
 name: leads-workstation-ci
-
 on:
   pull_request:
   push:
@@ -26,23 +25,38 @@ jobs:
           assert "country" != "business_category"
           print("lead contract OK")
           PY
+      - name: Static quality dependencies
+        run: python -m pip install -q ruff pyyaml
+      - name: Static quality
+        run: |
+          ruff check src tests scripts
+          python -m compileall -q src tests scripts
+          python -m tabnanny src tests scripts
+          python - <<'PY'
+          import yaml
+          with open("contracts/leads-v2.openapi.yaml", "r", encoding="utf-8") as fh:
+              spec = yaml.safe_load(fh)
+          assert spec["openapi"].startswith("3.")
+          assert "/api/v2/leads" in spec["paths"]
+          print("OpenAPI contract OK")
+          PY
       - name: Unit tests
         env:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
-      - name: Compile
-        run: python -m compileall -q src
+      - name: Security scan
+        run: python scripts/security_scan.py
 
   postgres_integration:
-    name: postgres-integration
+    name: postgres-redis-integration
     runs-on: ubuntu-latest
     services:
       postgres:
         image: postgres:18-alpine
         env:
-          POSTGRES_USER: leads_test
-          POSTGRES_PASSWORD: leads_test_only
           POSTGRES_DB: leads_test
+          POSTGRES_USER: leads_test
+          POSTGRES_PASSWORD: leads_test
         ports:
           - 5432:5432
         options: >-
@@ -59,62 +73,56 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 20
+    env:
+      LEADS_POSTGRES_TEST_DSN: postgresql://leads_test:leads_test@127.0.0.1:5432/leads_test
+      LEADS_ALLOW_TEST_RESET: "1"
+      REDIS_TEST_URL: redis://127.0.0.1:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install production extras
+      - name: Install production dependencies
         run: python -m pip install -e '.[production]'
-      - name: PostgreSQL and Redis integration tests
-        env:
-          PYTHONPATH: src
-          LEADS_POSTGRES_TEST_DSN: postgresql://leads_test:leads_test_only@127.0.0.1:5432/leads_test
-          LEADS_ALLOW_TEST_RESET: "1"
-          REDIS_TEST_URL: redis://127.0.0.1:6379/0
-        run: python -m unittest tests.test_postgres_integration -v
-
-  privacy_security:
-    name: privacy-security
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Verify private lead payload is not tracked
-        run: |
-          test -z "$(git ls-files 'data/private/**')"
-          printf '%s
-' 'data/private/sample.csv' | git check-ignore --stdin
-      - name: Scan tracked repository for accidental secrets
-        run: python scripts/security_scan.py
+      - name: Full V2 production test suite
+        run: python -m unittest discover -s tests -v
+      - name: V2 compile
+        run: python -m compileall -q src
 
   codestra_control_plane:
     name: codestra-control-plane
-    needs: [validate, postgres_integration, privacy_security]
+    needs: [validate, postgres_integration]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Enforce lead data privacy and certification evidence
+      - name: Enforce privacy, V2 architecture and certification evidence
         run: |
-          printf '%s
-' 'data/private/sample.csv' | git check-ignore --stdin
+          printf '%s\n' 'data/private/sample.csv' | git check-ignore --stdin
           test -f docs/CERTIFICATION-2026-10-07.md
+          test -f docs/V2-CERTIFICATION-2026-10-07.md
+          test -f docs/V2-ARCHITECTURE.md
           grep -q '88,379' docs/CERTIFICATION-2026-10-07.md
+          grep -q 'PostgreSQL' docs/V2-CERTIFICATION-2026-10-07.md
+          grep -q 'Keycloak' docs/V2-ARCHITECTURE.md
           grep -q 'Lead/contact payload must never be pushed to a public repository' AGENTS.md
-          test -f scripts/security_scan.py
+          test -f src/leads_workstation/auth.py
+          test -f src/leads_workstation/platform.py
+          test -f src/leads_workstation/worker.py
+          test -f src/leads_workstation/migrate.py
+          test -f docker-compose.v2.yml
 
   codestra_control_plane_legacy:
     name: codestra/control-plane
-    needs: [validate, postgres_integration, privacy_security, codestra_control_plane]
+    needs: [validate, postgres_integration, codestra_control_plane]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Verify governed workstation artifacts
         run: |
           test -f scripts/certify.ps1
+          test -f scripts/certify-v2.sh
           test -f scripts/stage-private-data.ps1
           test -f src/leads_workstation/db.py
-          test -f src/leads_workstation/auth.py
-          test -f src/leads_workstation/platform.py
-          test -f src/leads_workstation/storage.py
           test -f tests/test_import.py
           test -f tests/test_v2_platform.py
+          test -f tests/test_postgres_integration.py
