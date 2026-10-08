@@ -12,6 +12,9 @@ Final certification completed on **2026-10-08** for branch:
 
 - 25 tests passed
 - Python compilation passed
+- Ruff static analysis passed
+- workflow YAML validation passed
+- OpenAPI 3.1 YAML validation passed
 - security scan passed
 - V2 artifact checks passed
 - private-data git-ignore enforcement passed
