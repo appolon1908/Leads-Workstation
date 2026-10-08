@@ -12,9 +12,14 @@ from .auth import (
     AuthorizationError,
     authenticate,
     can_access_lead,
+    permissions_for,
     require_permission,
 )
-from .candidates import candidate_summary, list_candidates
+from .candidates import (
+    candidate_summary,
+    list_candidates,
+    promote_new_candidates,
+)
 from .dashboard import DASHBOARD_CSS, DASHBOARD_HTML, DASHBOARD_JS
 from .db import (
     ConcurrencyError,
@@ -30,6 +35,11 @@ from .db import (
 from .dedupe import find_duplicate_candidates
 from .metrics import prometheus_metrics
 from .platform import (
+    CAMPAIGN_STATES,
+    CAMPAIGN_TYPES,
+    CONTACT_VERIFICATION_STATES,
+    LIFECYCLE_TRANSITIONS,
+    MEMBER_ROLES,
     LifecycleError,
     SuppressedLeadError,
     add_campaign_member,
@@ -309,8 +319,41 @@ def make_handler(db_path):
                     {
                         "subject": ctx.subject,
                         "roles": sorted(ctx.roles),
+                        "permissions": sorted(permissions_for(ctx.roles)),
                         "campaign_ids": sorted(ctx.campaign_ids),
                         "issuer": ctx.issuer,
+                    }
+                )
+                return
+
+            if path == "/api/v2/options":
+                ctx = self.auth_context()
+                self.send_json(
+                    {
+                        "permissions": sorted(permissions_for(ctx.roles)),
+                        "lifecycle_transitions": {
+                            key: sorted(value)
+                            for key, value in LIFECYCLE_TRANSITIONS.items()
+                        },
+                        "contact_verification_states": sorted(
+                            CONTACT_VERIFICATION_STATES
+                        ),
+                        "campaign_types": sorted(CAMPAIGN_TYPES),
+                        "campaign_states": sorted(CAMPAIGN_STATES),
+                        "member_roles": sorted(MEMBER_ROLES),
+                        "consent_states": [
+                            "unknown",
+                            "opted_in",
+                            "opted_out",
+                            "legitimate_interest",
+                        ],
+                        "suppression_channels": [
+                            "all",
+                            "call",
+                            "sms",
+                            "email",
+                            "whatsapp",
+                        ],
                     }
                 )
                 return
@@ -350,6 +393,11 @@ def make_handler(db_path):
                     q=q.get("q", [None])[0],
                     campaign_id=q.get("campaign_id", [None])[0],
                     assigned_agent=q.get("assigned_agent", [None])[0],
+                    suppressed=(
+                        q.get("suppressed", [None])[0].lower() == "true"
+                        if q.get("suppressed", [None])[0] is not None
+                        else None
+                    ),
                 )
                 items = [lead for lead in items if can_access_lead(ctx, lead)]
                 self.send_json({"items": items, "count": len(items)})
@@ -397,6 +445,16 @@ def make_handler(db_path):
                 self.require("webhook:manage")
                 items = list_webhook_subscriptions(db_path)
                 self.send_json({"items": items, "count": len(items)})
+                return
+
+            if path == "/api/v2/candidates/summary":
+                self.require("candidate:read")
+                self.send_json(
+                    candidate_summary(
+                        db_path,
+                        q.get("batch_id", [None])[0],
+                    )
+                )
                 return
 
             if path == "/api/v2/candidates":
@@ -605,6 +663,19 @@ def make_handler(db_path):
                     source=str(payload.get("source") or "api-verification"),
                 )
                 self.send_json(item)
+                return
+
+            if path == "/api/v2/candidates/promote":
+                ctx = self.require("candidate:promote")
+                batch_id = str(payload.get("batch_id") or "").strip()
+                if not batch_id:
+                    raise ValueError("batch_id is required")
+                result = promote_new_candidates(
+                    db_path,
+                    batch_id,
+                    actor=ctx.subject,
+                )
+                self.send_json({"batch_id": batch_id, **result})
                 return
 
             if path == "/api/v2/dedupe/preview":

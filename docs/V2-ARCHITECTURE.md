@@ -242,3 +242,22 @@ This mode is not enabled by default. It requires all of the following:
 - explicit campaign scope configuration
 
 The service role can perform governed lead-domain operations and read campaign metadata, but cannot create or mutate campaign authority, campaign membership, or webhook administration. Production user and agent authentication remains Keycloak.
+
+
+## Interactive operator dashboard
+
+The V2 dashboard is a same-origin operator application served by the Leads Workstation API. It does not embed provider credentials or bypass API authorization.
+
+Primary flow:
+
+1. **Overview** — clickable operational metrics route into filtered lead, campaign, candidate, or integration views.
+2. **All Leads / Kanban** — search and lifecycle views open a lead detail drawer.
+3. **Lead Focus** — role-aware actions call governed V2 endpoints for edit, assignment, lifecycle transition, contact points, contact verification, consent, suppression and suppression lift.
+4. **Campaigns** — campaign cards open member/supervisor detail; authorized users can create/update campaigns and add members.
+5. **Candidates** — review rows link to matched canonical leads; authorized importers/admins can promote only `new` candidates from a selected batch.
+6. **Integrations** — outbox delivery state and redacted webhook subscriptions are inspectable; webhook creation remains admin-only.
+7. **Session & Access** — development headers remain loopback-only; bearer tokens are kept in browser memory and never persisted by dashboard code.
+
+The dashboard reads `/api/v2/options` after authentication so lifecycle transitions, verification states, campaign states/types, member roles, suppression channels and effective permissions are backend-driven rather than duplicated as frontend policy.
+
+Every mutation sends a request ID and idempotency key. Lead PATCH operations additionally send `If-Match` with the current lead version to preserve optimistic concurrency.
