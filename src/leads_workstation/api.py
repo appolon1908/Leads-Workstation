@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import uuid
@@ -780,11 +781,43 @@ def make_handler(db_path):
     return Handler
 
 
-def serve(db_path, host="127.0.0.1", port=8765, allow_network=False):
+def validate_network_binding(host: str, allow_network: bool) -> None:
     loopback = host in {"127.0.0.1", "localhost", "::1"}
-    if not loopback and not allow_network:
+    if loopback:
+        return
+    if not allow_network:
         raise SystemExit("Refusing non-loopback bind without --allow-network")
-    if not loopback and os.getenv("LEADS_AUTH_MODE", "closed").strip().lower() != "keycloak":
-        raise SystemExit("Network binding requires LEADS_AUTH_MODE=keycloak")
+
+    mode = os.getenv("LEADS_AUTH_MODE", "closed").strip().lower()
+    if mode == "keycloak":
+        return
+    if mode == "service":
+        token = os.getenv("LEADS_SERVICE_TOKEN", "").strip()
+        cidrs = [
+            value.strip()
+            for value in os.getenv("LEADS_SERVICE_ALLOWED_CIDRS", "").split(",")
+            if value.strip()
+        ]
+        if not token or not cidrs:
+            raise SystemExit(
+                "Network service auth requires LEADS_SERVICE_TOKEN and "
+                "LEADS_SERVICE_ALLOWED_CIDRS"
+            )
+        try:
+            for cidr in cidrs:
+                ipaddress.ip_network(cidr, strict=False)
+        except ValueError as exc:
+            raise SystemExit(
+                "Network service auth has an invalid CIDR allowlist"
+            ) from exc
+        return
+
+    raise SystemExit(
+        "Network binding requires LEADS_AUTH_MODE=keycloak or configured service auth"
+    )
+
+
+def serve(db_path, host="127.0.0.1", port=8765, allow_network=False):
+    validate_network_binding(host, allow_network)
     print("Leads Workstation V2: http://" + host + ":" + str(port))
     ThreadingHTTPServer((host, port), make_handler(db_path)).serve_forever()
