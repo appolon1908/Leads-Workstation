@@ -228,7 +228,7 @@ A governed V2 promotion requires:
 5. SQLite→PostgreSQL migration parity
 6. Docker Compose validation
 7. private-data git-ignore enforcement
-8. required Codestra control-plane checks
+8. GitHub Actions checks and applicable GitHub rulesets, including required reviews, resolved discussions, signed commits and an up-to-date branch (see [GitHub merge policy](GITHUB-MERGE-POLICY.md))
 
 ## Internal Middleware service identity
 

@@ -47,6 +47,10 @@ Certified evidence:
 - repeatable install, import, start, backup and certification scripts
 - CI runs contract validation, unit tests, compilation and required Codestra control-plane jobs
 
+Policy update (2026-11-03): the controller jobs above describe the historical
+certification. Current source-merge requirements come from GitHub Actions and
+GitHub rulesets; see [GitHub merge policy](GITHUB-MERGE-POLICY.md).
+
 ## Data publication status
 
 The repository is still public. Lead/contact payloads are therefore protected under the git-ignored data/private directory. No lead PII is committed or pushed to the public repository.
