@@ -30,6 +30,14 @@ paths:
           description: Authenticated identity
         "401":
           description: Missing or invalid identity
+  /api/v2/options:
+    get:
+      summary: Policy-driven UI options and effective permissions
+      responses:
+        "200":
+          description: Lifecycle, campaign, verification and permission options
+        "401":
+          description: Missing or invalid identity
   /api/v2/stats:
     get:
       summary: Lead operational statistics
@@ -92,6 +100,10 @@ paths:
         - in: query
           name: assigned_agent
           schema: {type: string}
+        - in: query
+          name: suppressed
+          schema: {type: boolean}
+          description: Filter by global suppression state.
       responses:
         "200":
           description: Lead list
@@ -206,6 +218,30 @@ paths:
       responses:
         "200":
           description: Consent recorded
+  /api/v2/leads/{lead_id}/assignments:
+    get:
+      summary: Read lead assignment history
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Assignment history
+  /api/v2/leads/{lead_id}/transitions:
+    get:
+      summary: Read lead lifecycle transition history
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Lifecycle transition history
+  /api/v2/leads/{lead_id}/suppressions:
+    get:
+      summary: Read lead suppression history
+      parameters:
+        - $ref: "#/components/parameters/LeadId"
+      responses:
+        "200":
+          description: Suppression history
   /api/v2/leads/{lead_id}/events:
     get:
       summary: Read lead audit events
@@ -226,6 +262,31 @@ paths:
       responses:
         "200":
           description: Candidate list
+  /api/v2/candidates/summary:
+    get:
+      summary: Summarize candidate dispositions
+      parameters:
+        - in: query
+          name: batch_id
+          schema: {type: string}
+      responses:
+        "200":
+          description: Candidate summary
+  /api/v2/candidates/promote:
+    post:
+      summary: Promote new candidates from one governed batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [batch_id]
+              properties:
+                batch_id: {type: string}
+      responses:
+        "200":
+          description: Promotion result
   /api/v2/outbox:
     get:
       summary: Inspect integration outbox
