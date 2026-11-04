@@ -111,10 +111,13 @@ def can_access_lead(ctx: AuthContext, lead: dict) -> bool:
         "auditor",
         "readonly",
         "importer",
-        "middleware_service",
     ):
         return True
     campaign_id = lead.get("campaign_id")
+    if ctx.has_role("middleware_service"):
+        return "*" in ctx.campaign_ids or bool(
+            campaign_id and campaign_id in ctx.campaign_ids
+        )
     if ctx.has_role("supervisor"):
         return bool(campaign_id and campaign_id in ctx.campaign_ids)
     if ctx.has_role("agent"):
@@ -188,6 +191,17 @@ def _client_ip_allowed(client_ip: str, cidr_csv: str) -> bool:
     return any(address in network for network in networks)
 
 
+def service_campaign_scope() -> frozenset[str]:
+    campaigns = frozenset(
+        value.strip()
+        for value in os.getenv("LEADS_SERVICE_CAMPAIGNS", "").split(",")
+        if value.strip()
+    )
+    if not campaigns:
+        raise AuthenticationError("service campaign scope must be explicitly configured")
+    return campaigns
+
+
 def authenticate(headers, client_ip: str) -> AuthContext:
     mode = os.getenv("LEADS_AUTH_MODE", "closed").strip().lower()
 
@@ -207,18 +221,10 @@ def authenticate(headers, client_ip: str) -> AuthContext:
         subject = os.getenv("LEADS_SERVICE_SUBJECT", "middleware-service").strip()
         if not subject:
             raise AuthenticationError("service subject must be configured")
-        campaigns_raw = os.getenv("LEADS_SERVICE_CAMPAIGNS", "*")
-        campaigns = frozenset(
-            value.strip()
-            for value in campaigns_raw.split(",")
-            if value.strip()
-        )
-        if not campaigns:
-            raise AuthenticationError("service campaign scope must be configured")
         return AuthContext(
             subject=subject,
             roles=frozenset({"middleware_service"}),
-            campaign_ids=campaigns,
+            campaign_ids=service_campaign_scope(),
             issuer="internal-service",
         )
 
