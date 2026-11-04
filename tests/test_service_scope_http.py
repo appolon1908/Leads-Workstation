@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from leads_workstation.api import make_handler
+from leads_workstation.auth import AuthContext
 from leads_workstation.db import create_lead, get_lead
 from leads_workstation.platform import (
     add_campaign_member,
@@ -97,6 +98,117 @@ class ServiceCampaignHttpTests(unittest.TestCase):
         self.assertEqual(
             {c["campaign_id"] for c in body["items"]}, {"campaign-a", "campaign-b"}
         )
+
+    def test_service_scope_filters_before_pagination_and_intersects_requested_campaign(
+        self,
+    ):
+        outside = create_lead(
+            self.db,
+            {
+                "business_name": "AAA outside scope",
+                "country": "Test",
+                "business_category": "Test",
+                "campaign_id": "campaign-other",
+            },
+            actor="synthetic-fixture",
+        )
+        first = create_lead(
+            self.db,
+            {
+                "business_name": "BBB allowed",
+                "country": "Test",
+                "business_category": "Test",
+                "campaign_id": "campaign-b",
+            },
+            actor="synthetic-fixture",
+        )
+        second = create_lead(
+            self.db,
+            {
+                "business_name": "CCC allowed",
+                "country": "Test",
+                "business_category": "Test",
+                "campaign_id": "campaign-a",
+            },
+            actor="synthetic-fixture",
+        )
+        for scope, query, expected in (
+            ("campaign-a,campaign-b", "limit=1&offset=0", [first["lead_id"]]),
+            ("campaign-a,campaign-b", "limit=1&offset=1", [second["lead_id"]]),
+            (
+                "campaign-a,campaign-b",
+                "limit=1&offset=2",
+                [self.leads["campaign-a"]["lead_id"]],
+            ),
+            ("campaign-a,campaign-b", "limit=1&offset=3", []),
+            (
+                "campaign-a,campaign-b",
+                "limit=1&campaign_id=campaign-b",
+                [first["lead_id"]],
+            ),
+            ("campaign-a,campaign-b", "limit=1&offset=1&campaign_id=campaign-b", []),
+            ("campaign-a,campaign-b", "limit=1&campaign_id=campaign-other", []),
+            ("*", "limit=1&offset=0", [outside["lead_id"]]),
+            ("*", "limit=1&offset=1", [first["lead_id"]]),
+            ("*", "limit=1&campaign_id=campaign-b", [first["lead_id"]]),
+        ):
+            with (
+                self.subTest(scope=scope, query=query),
+                patch.dict(os.environ, {"LEADS_SERVICE_CAMPAIGNS": scope}),
+            ):
+                status, body = self.request("/api/v2/leads?" + query)
+                self.assertEqual(status, 200)
+                self.assertEqual([lead["lead_id"] for lead in body["items"]], expected)
+                self.assertEqual(body["count"], len(expected))
+
+    def test_service_sql_scope_preserves_existing_global_role_precedence(self):
+        outside = create_lead(
+            self.db,
+            {
+                "business_name": "AAA globally readable",
+                "country": "Test",
+                "business_category": "Test",
+                "campaign_id": "campaign-other",
+            },
+            actor="synthetic-fixture",
+        )
+        for role in ("admin", "super_user", "auditor", "readonly", "importer"):
+            ctx = AuthContext(
+                "synthetic-keycloak-subject",
+                frozenset({"middleware_service", role}),
+                frozenset({"campaign-a"}),
+            )
+            with (
+                self.subTest(role=role),
+                patch("leads_workstation.api.authenticate", return_value=ctx),
+            ):
+                status, body = self.request("/api/v2/leads?limit=1")
+                self.assertEqual(status, 200)
+                self.assertEqual(
+                    [lead["lead_id"] for lead in body["items"]], [outside["lead_id"]]
+                )
+
+    def test_same_name_leads_have_stable_limit_one_page_boundaries(self):
+        for lead_id, email in (("tie-z", "z@example.com"), ("tie-a", "a@example.com")):
+            create_lead(
+                self.db,
+                {
+                    "lead_id": lead_id,
+                    "business_name": "AAA same name",
+                    "email": email,
+                    "country": "Test",
+                    "business_category": "Test",
+                    "campaign_id": "campaign-a",
+                },
+                actor="synthetic-fixture",
+            )
+        for offset, expected in ((0, "tie-a"), (1, "tie-z")):
+            with self.subTest(offset=offset):
+                status, body = self.request(f"/api/v2/leads?limit=1&offset={offset}")
+                self.assertEqual(status, 200)
+                self.assertEqual(
+                    [lead["lead_id"] for lead in body["items"]], [expected]
+                )
 
     def test_finite_scope_rejects_outside_lead_reads_and_mutations(self):
         for campaign in ("campaign-other", None):

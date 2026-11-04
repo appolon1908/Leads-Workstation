@@ -402,6 +402,13 @@ def make_handler(db_path):
                     status=q.get("status", [None])[0],
                     q=q.get("q", [None])[0],
                     campaign_id=q.get("campaign_id", [None])[0],
+                    campaign_ids=(
+                        ctx.campaign_ids
+                        if ctx.has_role("middleware_service")
+                        and not ctx.has_role("admin", "super_user", "auditor", "readonly", "importer")
+                        and "*" not in ctx.campaign_ids
+                        else None
+                    ),
                     assigned_agent=q.get("assigned_agent", [None])[0],
                     suppressed=(
                         q.get("suppressed", [None])[0].lower() == "true"

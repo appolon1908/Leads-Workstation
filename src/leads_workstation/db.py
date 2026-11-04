@@ -4,7 +4,7 @@ import csv
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -927,6 +927,8 @@ def list_leads(
     campaign_id: str | None = None,
     assigned_agent: str | None = None,
     suppressed: bool | None = None,
+    *,
+    campaign_ids: Iterable[str] | None = None,
 ) -> list[dict[str, Any]]:
     init_db(db_path)
     where = []
@@ -943,6 +945,14 @@ def list_leads(
     if campaign_id:
         where.append("campaign_id=?")
         params.append(campaign_id)
+    if campaign_ids is not None:
+        permitted_campaigns = tuple(campaign_ids)
+        if permitted_campaigns:
+            placeholders = ",".join("?" for _ in permitted_campaigns)
+            where.append(f"campaign_id IN ({placeholders})")
+            params.extend(permitted_campaigns)
+        else:
+            where.append("1=0")
     if assigned_agent:
         where.append("assigned_agent=?")
         params.append(assigned_agent)
@@ -965,9 +975,9 @@ def list_leads(
     if where:
         sql += " WHERE " + " AND ".join(where)
     if database_backend(db_path) == "postgres":
-        sql += " ORDER BY LOWER(business_name) LIMIT ? OFFSET ?"
+        sql += " ORDER BY LOWER(business_name),lead_id LIMIT ? OFFSET ?"
     else:
-        sql += " ORDER BY business_name COLLATE NOCASE LIMIT ? OFFSET ?"
+        sql += " ORDER BY business_name COLLATE NOCASE,lead_id LIMIT ? OFFSET ?"
     params.extend([max(1, min(int(limit), 500)), max(0, int(offset))])
     with db_connection(db_path) as conn:
         return [dict(r) for r in conn.execute(sql, params)]
