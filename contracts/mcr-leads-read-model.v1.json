@@ -1,0 +1,72 @@
+{
+  "schema_version": "1.0",
+  "authority": {
+    "read_model": "Leads-Workstation",
+    "decisioning": "Middleware MCR-C",
+    "schema_and_migrations": "Database-migrations-",
+    "provider_execution": "forbidden"
+  },
+  "middleware_authority_sha": "7d713735e46a0d0efc437808ad34f42ecdc41c6c",
+  "tenant_binding": {
+    "header": "X-Codestra-Tenant-Id",
+    "configured_env": "LEADS_MCR_TENANT_ID",
+    "mismatch_status": 403,
+    "missing_status": 401
+  },
+  "endpoints": [
+    {
+      "method": "GET",
+      "path": "/api/mcr/status",
+      "effect": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcr/leads/{lead_id}/summary",
+      "effect": "none"
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcr/leads/{lead_id}/journey",
+      "effect": "none",
+      "pagination": {
+        "limit_max": 200,
+        "offset_max": 10000
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/mcr/queues/{queue}",
+      "effect": "none",
+      "queues": [
+        "eligible",
+        "engaged",
+        "cooling",
+        "suppressed",
+        "converted"
+      ],
+      "pagination": {
+        "limit_max": 200,
+        "offset_max": 10000
+      }
+    }
+  ],
+  "projection_tables": [
+    "leads.mcr_lead_projection",
+    "leads.mcr_channel_health_projection",
+    "leads.mcr_suppression_projection",
+    "leads.mcr_exposure_projection",
+    "leads.mcr_delivery_projection"
+  ],
+  "fail_closed": {
+    "missing_tenant_configuration": "503 mcr_tenant_context_unavailable",
+    "missing_projection_schema": "503 projection_unavailable",
+    "absent_projection_for_known_lead": "404 mcr_projection_not_found"
+  },
+  "invariants": [
+    "No campaign eligibility or next-action decisions are computed in Leads-Workstation.",
+    "No provider dispatch, command execution, retries, or reconciliation are performed by these endpoints.",
+    "Every projection query is tenant-bound before reading MCR state.",
+    "All queue and journey reads are bounded and paginated.",
+    "Production/provider effects remain none."
+  ]
+}
