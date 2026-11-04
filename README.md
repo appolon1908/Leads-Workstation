@@ -1,42 +1,99 @@
 # Leads Workstation
 
-Local-first lead operations platform for Codestra on the Ubuntu desktop.
+Local-first lead operations platform for Codestra.
+
+## Implemented runtime
+
+This repository now contains a working lead workstation, not only architecture documents:
+
+- streaming import of the laptop lead master
+- SQLite canonical runtime with indexed search fields
+- deterministic dedupe fingerprints using email, then phone, then entity identity
+- SHA-256 source evidence and import-batch ledger
+- duplicate review ledger
+- per-lead audit events
+- searchable local JSON API and local landing page
+- loopback-only network safety by default
+- Git LFS declarations for future approved private lead-data publication
+- automated unit tests and CI
+
+Install on the laptop:
+
+1. cd C:\Users\Usuario\Documents\GitHub\Leads-Workstation
+2. .\scripts\install.ps1
+3. .\scripts\stage-private-data.ps1
+4. .\scripts\import-master.ps1
+5. .\scripts\start.ps1
+
+Then open http://127.0.0.1:8765
 
 ## Mission
 
-Provide one searchable, editable, auditable lead workspace with Monday-style views while keeping **Country** and **Business Category** as separate first-class fields.
+Provide one searchable, editable, auditable lead workspace while keeping Country and Business Category as separate first-class fields.
 
 ## Repository workflow
 
-1. **00 Authority & Architecture** — data authority, schema, contracts, country/business taxonomies.
-2. **10 Build & Test** — Leads API, UI, validation, audit history, local service.
-3. **20 Integration & Dependencies** — Meltano importer, Database-migrations, n8n, future CRM/contact-center adapters.
-4. **30 Staging & Release** — local certification, backup/restore, desktop launcher, operational handoff.
+1. 00 Authority & Architecture - data authority, schema, contracts, country/business taxonomies.
+2. 10 Build & Test - Leads API, UI, validation, audit history, local service.
+3. 20 Integration & Dependencies - Meltano importer, Database-migrations, n8n, future CRM/contact-center adapters.
+4. 30 Staging & Release - local certification, backup/restore, desktop launcher, operational handoff.
 
 ## System boundaries
 
-- **Leads-Workstation owns:** canonical lead business rules, CRUD API, dashboard UI, lead activity/audit surface.
-- **Meltano-Leads-Importer owns:** extraction/loading into raw import staging and import batch evidence.
-- **Database-migrations- owns:** PostgreSQL schemas, roles, grants, migrations, backup/restore database contracts.
-- **N8N owns:** downstream automation/orchestration after a lead is accepted; it must not become the canonical lead database.
+- Leads-Workstation owns canonical lead business rules, CRUD/query API, dashboard UI and audit surface.
+- Meltano-Leads-Importer owns extraction/loading into raw import staging.
+- Database-migrations- owns PostgreSQL schemas, roles, grants, migrations and backup/restore contracts.
+- N8N owns downstream automation after a lead is accepted and must not become the canonical lead database.
 
-### Write rule
+Write rule: n8n direct writes to canonical PostgreSQL lead tables are forbidden.
 
-`n8n -> PostgreSQL direct write` is forbidden for canonical lead records.
+Allowed writes:
+- Meltano to lead_import_raw
+- Leads API to canonical leads and audit
+- n8n to Leads API or governed command
 
-Allowed write paths:
+## Sensitive lead data
 
-`Meltano -> lead_import_raw`
+The GitHub repository was public when this implementation started. The actual lead payload is staged locally under data/private and is git-ignored until repository privacy is verified as PRIVATE. No lead PII should be committed to a public branch.
 
-`Leads API -> canonical leads + audit`
+## Candidate review lane
 
-`n8n -> Leads API / governed command`
+New lead sources do not write directly into the canonical lead table.
 
-## Required views
+The candidate workflow is:
 
-Executive · All Leads · Kanban · By Country · By Business · My Work · Data Quality · Import History · Lead Focus.
+1. Parse and normalize the incoming source.
+2. Compare normalized names and all available phone values against canonical leads.
+3. Store the batch in candidate_leads with a disposition.
+4. Keep possible matches in review.
+5. Promote only records classified as new.
+6. Mark historical/unverified records as Needs Verification.
+7. Preserve candidate provenance and the resulting canonical lead ID.
 
-## Control plane
+Current governed candidate batch:
 
-Linear project: Leads Workstation — Ubuntu Desktop  
-Notion workstation: Codestra — Leads Workstation
+- appraisers-2019-20190605
+- 107 named Dominican Republic property appraisers
+- 229 distinct historical phone numbers
+- 0 master phone overlaps
+- 0 master name overlaps
+- 107 promoted
+- current canonical total: 88,486
+
+Candidate API:
+
+- GET /api/candidates
+- GET /api/candidates/summary
+
+
+## V2 platform branch
+
+Leads Workstation V2 expands the certified local runtime into a standalone multi-user lead management service.
+
+V2 adds PostgreSQL, Keycloak RBAC, campaigns, assignment routing, lifecycle enforcement, contact verification, compliance/DNC, optimistic locking, weighted duplicate review, transactional outbox/webhooks, Redis integration, Prometheus metrics, encrypted backups and an authenticated operations dashboard.
+
+Architecture: docs/V2-ARCHITECTURE.md
+
+Certification: docs/V2-CERTIFICATION-2026-10-07.md
+
+Production code remains data-free. Raw lead/contact payload must stay outside Git unless the repository and the selected data-publication design have been independently verified appropriate for PII storage.
