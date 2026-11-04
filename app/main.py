@@ -314,6 +314,8 @@ def list_leads(
     owner: str | None = None,
     priority: str | None = None,
     limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    paginated: bool = False,
 ):
     where, params = [], []
     if q:
@@ -323,14 +325,18 @@ def list_leads(
     for col, val in [("country",country),("business_category",business_category),("status",status),("owner_name",owner),("priority",priority)]:
         if val:
             where.append(f"{col}=%s"); params.append(val)
-    sql = "select * from leads.leads"
-    if where:
-        sql += " where " + " and ".join(where)
-    sql += " order by updated_at desc limit %s"
-    params.append(limit)
+    filters = " where " + " and ".join(where) if where else ""
+    sql = "select * from leads.leads" + filters
+    sql += " order by updated_at desc, lead_id desc limit %s offset %s"
     with db() as (_, cur):
-        cur.execute(sql, params)
-        return cur.fetchall()
+        cur.execute(sql, params + [limit, offset])
+        items = cur.fetchall()
+        if not paginated:
+            return items
+        cur.execute("select count(*)::int total from leads.leads" + filters, params)
+        total = cur.fetchone()["total"]
+        return {"items": items, "total": total, "limit": limit, "offset": offset,
+                "has_more": offset + len(items) < total}
 
 @app.get("/api/leads/{lead_id}")
 def get_lead(lead_id: UUID):
