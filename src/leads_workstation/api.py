@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import uuid
@@ -14,6 +15,7 @@ from .auth import (
     can_access_lead,
     permissions_for,
     require_permission,
+    service_campaign_scope,
 )
 from .candidates import (
     candidate_summary,
@@ -159,6 +161,12 @@ def make_handler(db_path):
             require_permission(ctx, permission)
             return ctx
 
+        def require_global(self, permission: str):
+            ctx = self.require(permission)
+            if ctx.has_role("middleware_service") and "*" not in ctx.campaign_ids:
+                raise AuthorizationError("this operation requires global service campaign scope")
+            return ctx
+
         def require_legacy_local(self):
             if os.getenv("LEADS_ENABLE_V1", "0").strip() != "1":
                 raise AuthorizationError("legacy API is disabled")
@@ -166,11 +174,11 @@ def make_handler(db_path):
                 raise AuthorizationError("legacy API is loopback-only")
 
         def _scope_campaign(self, ctx, campaign_id: str | None) -> None:
-            if ctx.has_role("admin", "super_user", "middleware_service"):
+            if ctx.has_role("admin", "super_user"):
                 return
             if "*" in ctx.campaign_ids:
                 return
-            if ctx.has_role("agent", "supervisor") and not campaign_id:
+            if ctx.has_role("agent", "supervisor", "middleware_service") and not campaign_id:
                 raise AuthorizationError("campaign is required for this role")
             if campaign_id and campaign_id not in ctx.campaign_ids:
                 raise AuthorizationError("campaign is outside the caller scope")
@@ -236,7 +244,7 @@ def make_handler(db_path):
 
                 if parsed.path == "/metrics":
                     if self.client_address[0] not in {"127.0.0.1", "::1"}:
-                        self.require("audit:read")
+                        self.require_global("audit:read")
                     self.send_text(
                         prometheus_metrics(db_path),
                         "text/plain; version=0.0.4; charset=utf-8",
@@ -359,14 +367,16 @@ def make_handler(db_path):
                 return
 
             if path == "/api/v2/stats":
-                self.require("audit:read")
+                self.require_global("audit:read")
                 self.send_json(stats(db_path))
                 return
 
             if path == "/api/v2/campaigns":
                 ctx = self.require("campaign:read")
                 campaigns = list_campaigns(db_path, q.get("state", [None])[0])
-                if not ctx.has_role("admin", "super_user", "auditor", "readonly"):
+                if not ctx.has_role("admin", "super_user", "auditor", "readonly") and not (
+                    ctx.has_role("middleware_service") and "*" in ctx.campaign_ids
+                ):
                     campaigns = [
                         c for c in campaigns if c["campaign_id"] in ctx.campaign_ids
                     ]
@@ -392,6 +402,13 @@ def make_handler(db_path):
                     status=q.get("status", [None])[0],
                     q=q.get("q", [None])[0],
                     campaign_id=q.get("campaign_id", [None])[0],
+                    campaign_ids=(
+                        ctx.campaign_ids
+                        if ctx.has_role("middleware_service")
+                        and not ctx.has_role("admin", "super_user", "auditor", "readonly", "importer")
+                        and "*" not in ctx.campaign_ids
+                        else None
+                    ),
                     assigned_agent=q.get("assigned_agent", [None])[0],
                     suppressed=(
                         q.get("suppressed", [None])[0].lower() == "true"
@@ -432,7 +449,7 @@ def make_handler(db_path):
                     return
 
             if path == "/api/v2/outbox":
-                self.require("outbox:read")
+                self.require_global("outbox:read")
                 items = list_outbox(
                     db_path,
                     status=q.get("status", [None])[0],
@@ -448,7 +465,7 @@ def make_handler(db_path):
                 return
 
             if path == "/api/v2/candidates/summary":
-                self.require("candidate:read")
+                self.require_global("candidate:read")
                 self.send_json(
                     candidate_summary(
                         db_path,
@@ -458,7 +475,7 @@ def make_handler(db_path):
                 return
 
             if path == "/api/v2/candidates":
-                self.require("candidate:read")
+                self.require_global("candidate:read")
                 items = list_candidates(
                     db_path,
                     batch_id=q.get("batch_id", [None])[0],
@@ -679,7 +696,7 @@ def make_handler(db_path):
                 return
 
             if path == "/api/v2/dedupe/preview":
-                self.require("candidate:read")
+                self.require_global("candidate:read")
                 matches = find_duplicate_candidates(db_path, payload, limit=10)
                 self.send_json({"items": matches, "count": len(matches)})
                 return
@@ -728,6 +745,8 @@ def make_handler(db_path):
                     lead_id = parts[3]
                     self._lead_for_ctx(ctx, lead_id)
                     payload = self.read_json()
+                    if ctx.has_role("middleware_service") and "campaign_id" in payload:
+                        self._scope_campaign(ctx, payload["campaign_id"])
                     if ctx.has_role("agent") and any(
                         key in payload
                         for key in ("campaign_id", "assigned_agent", "owner")
@@ -780,11 +799,47 @@ def make_handler(db_path):
     return Handler
 
 
-def serve(db_path, host="127.0.0.1", port=8765, allow_network=False):
+def validate_network_binding(host: str, allow_network: bool) -> None:
     loopback = host in {"127.0.0.1", "localhost", "::1"}
-    if not loopback and not allow_network:
+    if loopback:
+        return
+    if not allow_network:
         raise SystemExit("Refusing non-loopback bind without --allow-network")
-    if not loopback and os.getenv("LEADS_AUTH_MODE", "closed").strip().lower() != "keycloak":
-        raise SystemExit("Network binding requires LEADS_AUTH_MODE=keycloak")
+
+    mode = os.getenv("LEADS_AUTH_MODE", "closed").strip().lower()
+    if mode == "keycloak":
+        return
+    if mode == "service":
+        token = os.getenv("LEADS_SERVICE_TOKEN", "").strip()
+        cidrs = [
+            value.strip()
+            for value in os.getenv("LEADS_SERVICE_ALLOWED_CIDRS", "").split(",")
+            if value.strip()
+        ]
+        if not token or not cidrs:
+            raise SystemExit(
+                "Network service auth requires LEADS_SERVICE_TOKEN and "
+                "LEADS_SERVICE_ALLOWED_CIDRS"
+            )
+        try:
+            for cidr in cidrs:
+                ipaddress.ip_network(cidr, strict=False)
+        except ValueError as exc:
+            raise SystemExit(
+                "Network service auth has an invalid CIDR allowlist"
+            ) from exc
+        try:
+            service_campaign_scope()
+        except AuthenticationError as exc:
+            raise SystemExit(str(exc)) from exc
+        return
+
+    raise SystemExit(
+        "Network binding requires LEADS_AUTH_MODE=keycloak or configured service auth"
+    )
+
+
+def serve(db_path, host="127.0.0.1", port=8765, allow_network=False):
+    validate_network_binding(host, allow_network)
     print("Leads Workstation V2: http://" + host + ":" + str(port))
     ThreadingHTTPServer((host, port), make_handler(db_path)).serve_forever()

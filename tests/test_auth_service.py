@@ -83,6 +83,36 @@ class MiddlewareServiceAuthTests(unittest.TestCase):
         self.assertNotIn("campaign:member", permissions)
         self.assertNotIn("webhook:manage", permissions)
 
+    def test_service_auth_requires_explicit_campaign_scope(self):
+        for scope in (None, "", " , \t,"):
+            env = self.service_env()
+            if scope is None:
+                env.pop("LEADS_SERVICE_CAMPAIGNS")
+            else:
+                env["LEADS_SERVICE_CAMPAIGNS"] = scope
+            with (
+                self.subTest(scope=scope),
+                patch.dict(os.environ, env, clear=True),
+                self.assertRaises(AuthenticationError),
+            ):
+                authenticate({"Authorization": "Bearer unit-test-token"}, "172.19.0.4")
+
+    def test_finite_service_scope_denies_other_and_unassigned_campaigns(self):
+        env = self.service_env()
+        env["LEADS_SERVICE_CAMPAIGNS"] = " campaign-a, campaign-b "
+        with patch.dict(os.environ, env, clear=True):
+            ctx = authenticate({"Authorization": "Bearer unit-test-token"}, "172.19.0.4")
+        self.assertEqual(ctx.campaign_ids, frozenset({"campaign-a", "campaign-b"}))
+        for campaign_id, expected in (
+            ("campaign-a", True),
+            ("campaign-b", True),
+            ("campaign-other", False),
+            (None, False),
+            ("", False),
+        ):
+            with self.subTest(campaign_id=campaign_id):
+                self.assertEqual(can_access_lead(ctx, {"campaign_id": campaign_id}), expected)
+
 
 if __name__ == "__main__":
     unittest.main()

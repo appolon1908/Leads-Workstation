@@ -243,6 +243,21 @@ This mode is not enabled by default. It requires all of the following:
 
 The service role can perform governed lead-domain operations and read campaign metadata, but cannot create or mutate campaign authority, campaign membership, or webhook administration. Production user and agent authentication remains Keycloak.
 
+Non-loopback service binding additionally requires `--allow-network`, a nonempty
+token, a valid source CIDR allowlist, and explicit nonempty
+`LEADS_SERVICE_CAMPAIGNS`. Configure a comma-separated list of campaign IDs for
+finite access, or explicitly set `*` to authorize global access. An omitted scope
+fails closed; there is no implicit global default.
+
+A finite service scope applies to lead lists, individual leads and their related
+records, campaign metadata and members, lead creation, and both the source and
+destination of reassignment (including PATCH). Leads without a campaign are
+outside a finite scope. Database-wide stats, outbox, candidate reads, dedupe
+preview, and authenticated network metrics require explicit `*` service scope
+because those endpoints do not expose a campaign-scoped data contract. Local
+loopback metrics retain their existing local-only access rule. Source CIDR checks
+use the socket peer address; forwarded headers do not grant access.
+
 
 ## Interactive operator dashboard
 
