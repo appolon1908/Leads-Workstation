@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Codestra Leads Workstation
+Comment=Open the local backup/recovery Leads Workstation
+Exec=xdg-open http://127.0.0.1:8780/
+Icon=applications-office
+Terminal=false
+Categories=Development;Office;
+StartupNotify=true

@@ -3,6 +3,10 @@ on:
   pull_request:
   push:
     branches: [main]
+
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -15,6 +19,7 @@ jobs:
         run: |
           python -m json.tool contracts/integration-map.v1.json >/dev/null
           python -m json.tool contracts/lead-record.schema.json >/dev/null
+          python -m json.tool contracts/mcr-leads-read-model.v1.json >/dev/null
       - name: Verify country and business fields are distinct
         run: |
           python - <<'PY'
@@ -25,3 +30,7 @@ jobs:
           assert "country" != "business_category"
           print("lead contract OK")
           PY
+      - name: Run API regression tests
+        run: |
+          python -m pip install -r requirements.txt pytest httpx2
+          python -m pytest -q tests
