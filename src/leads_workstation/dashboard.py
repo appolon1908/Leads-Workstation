@@ -260,7 +260,9 @@ pre.json{white-space:pre-wrap;word-break:break-word;background:#101828;color:#e4
 }
 @media(max-width:620px){
   .app-shell{display:block}.sidebar{position:static;height:auto;padding:10px 12px;display:block}.brand{display:none}
-  .side-nav{flex-direction:row;overflow-x:auto}.side-nav button span{display:block}.sidebar-foot{display:none}
+  .side-nav{flex-direction:row;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  .side-nav::-webkit-scrollbar{display:none}
+  .side-nav button{flex:0 0 auto;white-space:nowrap}.side-nav button span{display:block}.sidebar-foot{display:none}
   .topbar{height:auto;padding:14px 16px}.top-actions{gap:5px}main{padding:16px}
   .auth-panel{padding:12px 16px}.filter-bar{grid-template-columns:1fr}.search-wrap{grid-column:auto}
   .detail-grid,.form-grid,.split{grid-template-columns:1fr}.field.full{grid-column:auto}
